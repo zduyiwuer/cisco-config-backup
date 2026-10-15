@@ -28,23 +28,71 @@
 
 首次运行会自动创建运行环境并安装依赖（约 1-2 分钟），之后启动只需几秒。窗口保持打开，关闭窗口即停止服务。
 
+### Linux 部署
+
+完整说明见 **[deploy/DEPLOYMENT.md](deploy/DEPLOYMENT.md)**，两种方式任选。
+
+#### Docker（推荐）
+
+```bash
+git clone https://github.com/YOUR_NAME/cisco-config-backup.git
+cd cisco-config-backup
+cp .env.example .env      # 可选：预设管理员密码
+vim .env
+docker compose up -d
+```
+
+访问 `http://<服务器IP>:8077`。数据存放在 `./data`，容器重建不丢。
+
+```bash
+docker compose ps                # 查看状态（应为 healthy）
+docker compose logs -f           # 跟踪日志
+docker compose down              # 停止
+docker compose up -d --build     # 升级
+```
+
+#### systemd
+
+```bash
+sudo ./deploy/install_systemd.sh   # 装到 /opt/cisco-backup，自动建用户并启动
+```
+
+```bash
+systemctl status cisco-backup      # 查看状态
+journalctl -u cisco-backup -f      # 实时日志
+systemctl restart cisco-backup     # 重启
+```
+
+首次安装会显示一次性管理员密码并写入 `/etc/cisco-backup/env`（权限 600）。
+
+> 生产环境建议前置 Nginx + HTTPS，配置示例见 `deploy/nginx.conf.example`。
+
 ### 手动启动
 
 ```bash
 cd cisco-backup
 
-# 1. 创建虚拟环境
-python -m venv .venv
+# 1. 创建虚拟环境（需 Python 3.10+）
+python3 -m venv .venv
 
 # 2. 安装依赖
+./.venv/bin/pip install -r requirements.txt         # Linux/macOS
 ./.venv/Scripts/pip install -r requirements.txt      # Windows
-./.venv/bin/pip install -r requirements.txt          # Linux/macOS
 
 # 3. 启动（默认自动打开浏览器）
-./.venv/Scripts/python run.py
+./.venv/bin/python run.py
 ```
 
-打开 <http://127.0.0.1:8077>，添加设备后点「备份」即可。
+打开 <http://127.0.0.1:8077>，用 admin 登录后添加设备。
+
+### 环境变量
+
+| 变量 | 说明 |
+|---|---|
+| `CBS_HOST` | 监听地址，默认 `127.0.0.1`，服务器部署用 `0.0.0.0` |
+| `CBS_PORT` | 监听端口，默认 `8077` |
+| `CBS_NO_BROWSER` | 设为 `1` 不自动开浏览器 |
+| `CBS_ADMIN_PASSWORD` | 初始管理员密码，留空则随机生成并打印在日志 |
 
 ### 开机自启（可选）
 
@@ -274,6 +322,14 @@ cisco-backup/
 │   └── static/                前端页面（含 login.html/css/js）
 ├── scripts/
 │   └── reset_admin_password.py 管理员密码重置
+├── deploy/                    Linux 部署
+│   ├── DEPLOYMENT.md          部署文档（Docker / systemd）
+│   ├── cisco-backup.service   systemd 服务模板
+│   ├── install_systemd.sh     systemd 一键安装脚本
+│   └── nginx.conf.example     Nginx 反代示例
+├── Dockerfile                 容器构建（多阶段）
+├── docker-compose.yml         容器编排
+├── .env.example               环境变量模板
 ├── tests/
 │   ├── fixtures.py            测试公共夹具
 │   ├── mock_device.py         模拟 Cisco 设备（SSH + Telnet）
