@@ -55,7 +55,7 @@ async function init() {
   }
   $('#login-foot-text').textContent = adInfo.ad_enabled
     ? '支持域账号与本地账号登录'
-    : '交换机配置备份与版本管理';
+    : '多厂商网络设备配置备份与版本管理';
 }
 
 $$('.login-tab').forEach((tab) => {

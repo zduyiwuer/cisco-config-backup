@@ -1,4 +1,4 @@
-/* Cisco 配置备份中心 - 前端逻辑 */
+/* 网络配置备份中心 - 前端逻辑 */
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
 
@@ -354,18 +354,43 @@ async function loadDevices() {
   fillDeviceSelects();
 }
 
+/** 厂商清单的兜底数据：接口不可用时前端仍能正确联动 */
+const VENDOR_FALLBACK = {
+  cisco: {
+    label: 'Cisco IOS', default_port: 22, needs_enable: true,
+    default_commands: ['show running-config', 'show cdp neighbors detail'],
+  },
+  h3c: {
+    label: 'H3C Comware', default_port: 22, needs_enable: false,
+    default_commands: ['display current-configuration', 'display lldp neighbor-information'],
+  },
+  huawei: {
+    label: '华为 VRP', default_port: 22, needs_enable: false,
+    default_commands: ['display current-configuration', 'display lldp neighbor brief'],
+  },
+  ruijie: {
+    label: '锐捷 RGOS', default_port: 22, needs_enable: false,
+    default_commands: ['show running-config', 'show lldp neighbors'],
+  },
+};
+
 /** 载入厂商清单并填充下拉 */
 async function loadVendors() {
   try {
     const list = await api('/api/vendors');
-    state.vendors = Object.fromEntries(list.map((v) => [v.id, v]));
-    $('#f-vendor').innerHTML = list
-      .map((v) => `<option value="${v.id}">${esc(v.label)}</option>`)
-      .join('');
-    applyVendorDefaults();
+    if (Array.isArray(list) && list.length) {
+      state.vendors = Object.fromEntries(list.map((v) => [v.id, v]));
+      $('#f-vendor').innerHTML = list
+        .map((v) => `<option value="${v.id}">${esc(v.label)}</option>`)
+        .join('');
+    } else {
+      throw new Error('厂商清单为空');
+    }
   } catch (e) {
-    // 接口不可用时保留 HTML 里的静态选项
+    // 接口异常时用兜底数据，保证联动仍然可用
+    state.vendors = { ...VENDOR_FALLBACK };
   }
+  applyVendorDefaults();
 }
 
 /** 按当前厂商套用默认端口与命令 */
@@ -375,25 +400,34 @@ function applyVendorDefaults(force) {
   if (!cfg) return;
   const portEl = $('#f-port');
   if (force || !portEl.value) portEl.value = cfg.default_port;
+
   const cmdsEl = $('#f-commands');
   const current = cmdsEl.value.split('\n').map((s) => s.trim()).filter(Boolean);
-  // 强制填充，或当前内容还是默认值时才自动替换
+  // 强制填充，或当前内容还是某个厂商的默认值时才自动替换
   const isDefaultish = !current.length ||
-    current.join('|') === 'show running-config|show cdp neighbors detail' ||
-    current.join('|') === 'display current-configuration|display lldp neighbor brief' ||
-    current.join('|') === 'display current-configuration|display lldp neighbor-information';
+    Object.values(state.vendors).some(
+      (v) => v.default_commands.join('|') === current.join('|')
+    );
   if (force || isDefaultish) {
     cmdsEl.value = cfg.default_commands.join('\n');
+    if (force && current.length && !isDefaultish) {
+      // 用户主动点的填充按钮，覆盖自定义命令时提示一下
+      toast(`已按${cfg.label} 填充默认命令`, 'ok');
+    }
   }
-  // Cisco 才需要 enable 密码
-  const enEl = $('#f-enable').closest('label');
-  if (enEl) enEl.style.opacity = cfg.needs_enable ? '1' : '.45';
+
+  // 仅 Cisco 需要 enable 密码，其余厂商置灰并提示
+  const enEl = $('#f-enable');
+  const label = enEl.closest('label');
+  if (label) label.style.opacity = cfg.needs_enable ? '1' : '.45';
+  enEl.placeholder = cfg.needs_enable
+    ? '仅 Cisco 需要（enable 提权）'
+    : `${cfg.label} 登录后即特权视图，留空即可`;
 }
 
 $('#f-vendor').addEventListener('change', () => applyVendorDefaults(true));
 $('#btn-fill-default-cmds').addEventListener('click', () => {
   applyVendorDefaults(true);
-  toast('已按厂商填充默认采集命令', 'ok');
 });
 
 function renderStats() {
@@ -494,6 +528,7 @@ $('#device-table').addEventListener('click', async (e) => {
     } catch (err) { toast(err.message, 'err'); }
     btn.disabled = false; btn.textContent = '测试';
   } else if (btn.classList.contains('act-edit')) {
+    if (!Object.keys(state.vendors).length) await loadVendors();
     openDeviceModal(dev);
   } else if (btn.classList.contains('act-pkg')) {
     downloadPackage({ scope: 'device', device_ids: [id] }, `正在打包 ${dev.name}…`);
@@ -920,23 +955,31 @@ function openDeviceModal(dev) {
   $('#f-host').value = dev ? dev.host : '';
   $('#f-protocol').value = dev ? dev.protocol : 'ssh';
   $('#f-vendor').value = dev ? (dev.device_type || 'cisco') : 'cisco';
-  applyVendorDefaults(!dev);
+
+  // 先把编辑态的字段填好，最后再统一套用厂商默认值，
+  // 否则后续赋值会把厂商联动刚填好的内容覆盖掉
   $('#f-port').value = dev ? dev.port : '';
   $('#f-username').value = dev ? dev.username : '';
   $('#f-password').value = '';
   $('#f-enable').value = '';
   $('#f-site-id').value = dev && dev.site_id ? String(dev.site_id) : '';
   $('#f-note').value = dev ? dev.note : '';
-  $('#f-commands').value = dev ? (dev.commands || []).join('\n') : 'show running-config\nshow cdp neighbors detail';
+  $('#f-commands').value = dev ? (dev.commands || []).join('\n') : '';
   $('#f-enabled').checked = dev ? dev.enabled : true;
   $('#f-scheduled').checked = dev ? dev.schedule_enabled : false;
   $('#f-cron').value = dev ? dev.cron : '0 2 * * *';
   $('#device-msg').classList.add('hidden');
+
+  // 新增设备时按厂商填充默认命令；编辑时保留设备自身的命令
+  applyVendorDefaults(!dev);
   $('#device-modal').classList.remove('hidden');
 }
 
 $('#f-protocol').addEventListener('change', (e) => {
-  if (!$('#f-port').value) $('#f-port').value = e.target.value === 'telnet' ? 23 : 22;
+  // 端口为空时按协议补默认值（22 / 23）
+  if (!$('#f-port').value) {
+    $('#f-port').value = e.target.value === 'telnet' ? 23 : 22;
+  }
 });
 
 $('#btn-save-device').addEventListener('click', async () => {
@@ -1124,7 +1167,11 @@ $('#btn-save-settings').addEventListener('click', async () => {
 });
 
 /* ------------------------------------------------------------- 全局交互 */
-$('#btn-add').addEventListener('click', () => openDeviceModal(null));
+$('#btn-add').addEventListener('click', async () => {
+  // 厂商清单尚未就绪时先等待，避免打开弹窗时命令没按厂商填充
+  if (!Object.keys(state.vendors).length) await loadVendors();
+  openDeviceModal(null);
+});
 $('#btn-settings').addEventListener('click', openSettings);
 $('#btn-refresh-history').addEventListener('click', loadHistory);
 $('#btn-backup-all').addEventListener('click', async () => {

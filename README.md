@@ -1,4 +1,4 @@
-# Cisco 配置备份中心
+# 网络配置备份中心
 
 通过 **SSH / Telnet** 登录网络设备，自动采集配置与邻居信息，存入本地 SQLite，保留历史版本并高亮展示差异。支持 **Cisco / H3C / 华为 / 锐捷** 多厂商、门店归类、在线探测、登录认证，备份文件可打包下载到本地。
 
@@ -493,7 +493,13 @@ curl -X POST http://127.0.0.1:8077/api/export/package \
 
 **依赖锁定**：`requirements.txt` 里 paramiko 必须锁 `<4.0`（原因见上），另需 `openpyxl`（Excel 导入）与 `python-multipart`（文件上传）。
 
-**静态资源禁用缓存**：前端 JS/CSS 由 `NoCacheStaticFiles` 挂载，统一带 `Cache-Control: no-store`，并在 HTML 引用处加了版本号参数。运维工具改动频繁，若沿用默认缓存策略会出现「代码明明改了、浏览器跑的还是旧逻辑」这类极难定位的问题——尤其是新加的按钮事件绑定在旧 JS 里根本不存在，表现为点击毫无反应且无任何报错。
+**静态资源版本号自动注入**：HTML 里的 `?v=` 参数由后端按文件 **mtime 自动生成**（`_asset_version` / `_html_with_asset_versions`），HTML 源码里不写死版本号。
+
+这个设计是被两次线上问题逼出来的：改了前端后忘记更新 `?v=`，浏览器继续加载旧 JS，表现为「代码明明改了、功能却没生效」「新加的按钮点了没反应且控制台无报错」——厂商选择不联动命令就是这个问题引起的。手工维护版本号必然会漏，改成按 mtime 自动注入后从根上消除。
+
+同时静态资源挂 `NoCacheStaticFiles`，统一带 `Cache-Control: no-store`。
+
+**厂商联动的初始化顺序**：`openDeviceModal` 里必须先给各字段赋值（含把命令框置空），**最后**才调 `applyVendorDefaults()`。顺序颠倒会让后面的赋值覆盖掉厂商刚填好的命令。`tests/test_vendor_ui.py` 专门校验这个顺序。
 
 **密码与会话安全**：本地密码用 PBKDF2-HMAC-SHA256（26 万次迭代 + 16 字节随机盐）存储；会话 token 数据库里只存 SHA256 哈希。两者都不可逆推，数据库文件泄露也无法直接冒用。会话 Cookie 设 `HttpOnly` + `SameSite=Lax`，仅 HTTPS 下才加 `Secure`。
 

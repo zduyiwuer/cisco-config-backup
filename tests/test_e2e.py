@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import re
 import shutil
 import sys
 import tempfile
@@ -244,7 +245,13 @@ def main() -> int:
         check("不存在的设备返回 404", r.status_code == 404)
 
         r = client.get("/")
-        check("GET / 返回前端页面", r.status_code == 200 and "Cisco 配置备份中心" in r.text)
+        check("GET / 返回前端页面", r.status_code == 200 and "网络配置备份中心" in r.text)
+        # 静态资源版本号由后端按 mtime 注入，避免手工维护 ?v= 漏改导致缓存旧 JS
+        check("JS 引用带自动版本号",
+              re.search(r"/static/app\.js\?v=\d+", r.text) is not None,
+              r.text[:200])
+        check("CSS 引用带自动版本号",
+              re.search(r"/static/style\.css\?v=\d+", r.text) is not None)
 
         # 为 core-sw-01 开启定时，供下一节断言调度器
         r = client.patch(

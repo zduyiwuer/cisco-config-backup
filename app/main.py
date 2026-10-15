@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import logging
+import re
 import zipfile
 from contextlib import asynccontextmanager
 from typing import Any
@@ -31,6 +32,9 @@ log = logging.getLogger("cisco-backup")
 
 STATIC_DIR = __import__("pathlib").Path(__file__).resolve().parent / "static"
 
+# 应用名称：支持 Cisco / H3C / 华为 / 锐捷等多厂商，不再带厂商前缀
+APP_NAME = "网络配置备份中心"
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -43,7 +47,7 @@ async def lifespan(app: FastAPI):
     scheduler.shutdown()
 
 
-app = FastAPI(title="Cisco 配置备份中心", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title=APP_NAME, version="1.0.0", lifespan=lifespan)
 
 SESSION_COOKIE = "cbs_session"
 PUBLIC_PATHS = {
@@ -985,14 +989,14 @@ def index(request: Request) -> Any:
     """未登录跳登录页；已登录进主界面。"""
     if db.get_settings().get("auth_enabled", True) and not current_user(request):
         return RedirectResponse("/login", status_code=302)
-    return FileResponse(STATIC_DIR / "index.html")
+    return HTMLResponse(_html_with_asset_versions("index.html"))
 
 
 @app.get("/login", response_class=HTMLResponse)
 def login_page(request: Request) -> Any:
     if db.get_settings().get("auth_enabled", True) and current_user(request):
         return RedirectResponse("/", status_code=302)
-    return FileResponse(STATIC_DIR / "login.html")
+    return HTMLResponse(_html_with_asset_versions("login.html"))
 
 
 class NoCacheStaticFiles(StaticFiles):
@@ -1008,6 +1012,29 @@ class NoCacheStaticFiles(StaticFiles):
         response.headers["Pragma"] = "no-cache"
         response.headers["Expires"] = "0"
         return response
+
+
+def _asset_version(filename: str) -> str:
+    """用文件 mtime 作为版本号，避免手工维护 ?v= 参数漏改。"""
+    path = STATIC_DIR / filename
+    try:
+        return str(int(path.stat().st_mtime))
+    except OSError:
+        return "0"
+
+
+def _html_with_asset_versions(filename: str) -> str:
+    """读取 HTML 并把静态资源引用替换为带 mtime 版本号的 URL。"""
+    html = (STATIC_DIR / filename).read_text(encoding="utf-8")
+    for asset in ("app.js", "style.css", "login.js", "login.css"):
+        version = _asset_version(asset)
+        # 同时替换带旧版本号与不带版本号的引用
+        html = re.sub(
+            rf"/static/{re.escape(asset)}(\?v=[0-9A-Za-z._-]+)?",
+            f"/static/{asset}?v={version}",
+            html,
+        )
+    return html
 
 
 app.mount("/static", NoCacheStaticFiles(directory=STATIC_DIR), name="static")
