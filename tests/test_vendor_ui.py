@@ -58,12 +58,12 @@ def main() -> int:
         print("\n=== 1. 应用名称已改为通用名===")
         r = client.get("/")
         check("首页可访问", r.status_code == 200)
-        check("标题为网络配置备份中心", "<title>网络配置备份中心</title>" in r.text, r.text[:200])
-        check("页面 H1 为网络配置备份中心", "<h1>网络配置备份中心</h1>" in r.text)
+        check("标题为多厂商网络设备配置备份中心", "<title>多厂商网络设备配置备份中心</title>" in r.text, r.text[:200])
+        check("页面 H1 为多厂商网络设备配置备份中心", "<h1>多厂商网络设备配置备份中心</h1>" in r.text)
         check("标题不含厂商前缀", "Cisco 配置备份中心" not in r.text)
         check("副标题体现多厂商", "多厂商" in r.text)
         check("OpenAPI 标题已更新",
-              client.get("/openapi.json").json()["info"]["title"] == "网络配置备份中心")
+              client.get("/openapi.json").json()["info"]["title"] == "多厂商网络设备配置备份中心")
 
         print("\n=== 2. 静态资源版本号自动注入 ===")
         r = client.get("/")
@@ -85,7 +85,7 @@ def main() -> int:
         r2 = client.get("/login")
         check("登录页也注入版本号",
               re.search(r"/static/login\.js\?v=\d+", r2.text) is not None)
-        check("登录页标题已改名", "登录 · 网络配置备份中心" in r2.text)
+        check("登录页标题已改名", "登录 · 多厂商网络设备配置备份中心" in r2.text)
 
         print("\n=== 3. 前端联动逻辑静态检查 ===")
         js = (ROOT / "app/static/app.js").read_text(encoding="utf-8")

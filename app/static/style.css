@@ -25,7 +25,7 @@ button{font-family:inherit;font-size:inherit;cursor:pointer}
   width:42px;height:42px;border-radius:11px;display:grid;place-items:center;
   background:linear-gradient(135deg,#2563eb,#4f8bff);color:#fff;font-size:20px;
 }
-.topbar h1{font-size:18px}
+.topbar h1{font-size:18px;line-height:1.35;letter-spacing:-.2px}
 .sub{color:var(--text-mute);font-size:12.5px}
 .top-actions{display:flex;gap:10px}
 
@@ -271,4 +271,14 @@ select[multiple] option{padding:5px 8px;border-radius:4px}
   .topbar,.tabs,.tab-panel{padding-left:16px;padding-right:16px}
   .form-grid{grid-template-columns:1fr}
   .form-grid.tight{grid-template-columns:1fr}
+  /* 标题较长，窄屏缩小字号避免换行 */
+  .topbar h1{font-size:16px}
+  .top-actions{gap:6px}
+  .top-actions .btn{padding:8px 12px;font-size:13px}
+}
+@media (max-width:560px){
+  /* 极窄屏：标题与副标题分两行，隐藏副标题节省空间 */
+  .topbar{flex-wrap:wrap;gap:10px}
+  .topbar .sub{display:none}
+  .topbar h1{font-size:15px}
 }

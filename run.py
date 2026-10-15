@@ -19,7 +19,7 @@ from threading import Timer
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="网络配置备份中心")
+    parser = argparse.ArgumentParser(description="多厂商网络设备配置备份中心")
     parser.add_argument(
         "--host",
         default=os.environ.get("CBS_HOST", "127.0.0.1"),
@@ -41,7 +41,7 @@ def main() -> None:
     browser_host = "127.0.0.1" if args.host in ("0.0.0.0", "::") else args.host
     url = f"http://{browser_host}:{args.port}/"
 
-    print(f"\n  网络配置备份中心已启动->  {url}")
+    print(f"\n  多厂商网络设备配置备份中心已启动->  {url}")
     if args.host == "0.0.0.0":
         print("  监听 0.0.0.0，可通过服务器 IP 访问")
         print("  生产环境建议前置 Nginx + HTTPS，并设置 CBS_ADMIN_PASSWORD")

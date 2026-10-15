@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================
-#  网络配置备份中心 - systemd 一键安装（Linux）
+#  多厂商网络设备配置备份中心 - systemd 一键安装（Linux）
 #
 #  用法：
 #    sudo ./deploy/install_systemd.sh              # 克隆到 /opt/cisco-backup

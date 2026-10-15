@@ -33,7 +33,7 @@ log = logging.getLogger("cisco-backup")
 STATIC_DIR = __import__("pathlib").Path(__file__).resolve().parent / "static"
 
 # 应用名称：支持 Cisco / H3C / 华为 / 锐捷等多厂商，不再带厂商前缀
-APP_NAME = "网络配置备份中心"
+APP_NAME = "多厂商网络设备配置备份中心"
 
 
 @asynccontextmanager

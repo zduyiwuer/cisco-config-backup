@@ -1,4 +1,4 @@
-/* 网络配置备份中心 - 前端逻辑 */
+/* 多厂商网络设备配置备份中心 - 前端逻辑 */
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
 

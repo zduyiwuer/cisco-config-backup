@@ -16,7 +16,10 @@
   background:linear-gradient(135deg,#2563eb,#4f8bff);color:#fff;font-size:25px;
   box-shadow:0 6px 16px rgba(37,99,235,.28);margin-bottom:14px;
 }
-.login-head h1{font-size:19px;font-weight:600;margin:0 0 5px;color:#1a2333}
+.login-head h1{
+  font-size:19px;font-weight:600;margin:0 0 5px;color:#1a2333;
+  line-height:1.35;letter-spacing:-.2px;
+}
 .login-head p{margin:0;color:#8b98ad;font-size:13px}
 
 .login-tabs{
@@ -66,4 +69,10 @@
 }
 @media (max-width:420px){
   .login-card{padding:28px 22px 22px}
+  /* 标题较长，窄屏缩小字号避免换行 */
+  .login-head h1{font-size:16.5px}
+  .login-logo{width:44px;height:44px;font-size:21px;margin-bottom:10px}
+}
+@media (max-width:340px){
+  .login-head h1{font-size:15px}
 }

@@ -1,5 +1,5 @@
 [Unit]
-Description=网络配置备份中心
+Description=多厂商网络设备配置备份中心
 Documentation=https://github.com/zduyiwuer/cisco-config-backup
 After=network-online.target
 Wants=network-online.target
