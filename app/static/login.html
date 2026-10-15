@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>登录 · Cisco 配置备份中心</title>
+<link rel="stylesheet" href="/static/style.css?v=20261015-3">
+<link rel="stylesheet" href="/static/login.css?v=20261015-3">
+</head>
+<body class="login-body">
+<div class="login-wrap">
+  <div class="login-card">
+    <div class="login-head">
+      <span class="login-logo">◈</span>
+      <h1>Cisco 配置备份中心</h1>
+      <p>请登录以继续</p>
+    </div>
+
+    <div class="login-tabs" id="login-tabs">
+      <button class="login-tab active" data-mode="local">本地账号</button>
+      <button class="login-tab hidden" id="tab-ad" data-mode="ad">域账号</button>
+    </div>
+
+    <form id="login-form" autocomplete="on">
+      <label class="login-field">
+        <span id="label-user">用户名</span>
+        <input type="text" id="username" autocomplete="username" required autofocus
+               placeholder="请输入用户名">
+      </label>
+      <label class="login-field">
+        <span>密码</span>
+        <span class="pwd-wrap">
+          <input type="password" id="password" autocomplete="current-password" required
+                 placeholder="请输入密码">
+          <button type="button" class="pwd-toggle" id="pwd-toggle"
+                  aria-label="显示密码" title="显示/隐藏密码">👁</button>
+        </span>
+      </label>
+
+      <div class="login-hint hidden" id="ad-hint"></div>
+
+      <div class="login-error hidden" id="login-error"></div>
+
+      <button type="submit" class="btn primary login-submit" id="login-btn">登 录</button>
+    </form>
+
+    <div class="login-foot">
+      <span id="login-foot-text">交换机配置备份与版本管理</span>
+    </div>
+  </div>
+</div>
+
+<script src="/static/login.js?v=20261015-3"></script>
+</body>
+</html>

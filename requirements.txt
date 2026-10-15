@@ -1,0 +1,13 @@
+fastapi>=0.110
+uvicorn[standard]>=0.27
+# 必须锁 <4.0：paramiko 4.0/5.0 调用了 Python 3.14 才有的线程接口，
+# 在 3.13 上会抛 TypeError: '_thread._ThreadHandle' object is not callable
+paramiko>=3.4,<4.0
+APScheduler>=3.10
+cryptography>=42.0
+# Excel 设备清单导入
+openpyxl>=3.1
+# 设备导入的文件上传（multipart/form-data）
+python-multipart>=0.0.9
+# Active Directory / LDAP 登录
+ldap3>=2.9

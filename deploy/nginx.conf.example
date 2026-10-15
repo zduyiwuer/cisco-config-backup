@@ -1,0 +1,91 @@
+# ============================================================
+#  Nginx 反向代理示例 - Cisco 配置备份中心
+#
+#  放到 /etc/nginx/conf.d/cisco-backup.conf 后：
+#     nginx -t && systemctl reload nginx
+#
+#  先申请证书（以Let's Encrypt 为例）：
+#     certbot --nginx -d backup.corp.local
+# ============================================================
+
+upstream cisco_backup {
+    server 127.0.0.1:8077;
+    keepalive 16;
+}
+
+# HTTP：仅用于证书签发与跳转
+server {
+    listen 80;
+    server_name backup.corp.local;
+
+    # certbot 签发证书需要保留此段
+    location /.well-known/acme-challenge/ {
+        root /var/www/html;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl http2;
+    server_name backup.corp.local;
+
+    # ---------- 证书 ----------
+    # 路径由 certbot 自动生成；若自签请替换为实际路径
+    ssl_certificate     /etc/letsencrypt/live/backup.corp.local/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/backup.corp.local/privkey.pem;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_ciphers         HIGH:!aNULL:!MD5;
+    ssl_session_cache   shared:SSL:10m;
+
+    # ---------- 安全响应头 ----------
+    add_header Strict-Transport-Security "max-age=31536000" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header Referrer-Policy "same-origin" always;
+
+    # ---------- 访问日志 ----------
+    access_log /var/log/nginx/cisco-backup.access.log;
+    error_log  /var/log/nginx/cisco-backup.error.log;
+
+    # ---------- 上传限制（设备导入文件 5MB，留出余量）----------
+    client_max_body_size 10m;
+
+    # ---------- 反向代理 ----------
+    location / {
+        proxy_pass         http://cisco_backup;
+        proxy_http_version 1.1;
+
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_set_header   Connection        "";
+
+        # 备份与打包导出可能耗时较久
+        proxy_connect_timeout 30s;
+        proxy_send_timeout    600s;
+        proxy_read_timeout    600s;
+
+        proxy_buffering    off;
+        proxy_request_buffering off;
+    }
+
+    # 静态资源不缓存（与后端策略一致，便于升级后立即生效）
+    location /static/ {
+        proxy_pass http://cisco_backup;
+        proxy_set_header Host $host;
+        add_header Cache-Control "no-store, no-cache, must-revalidate" always;
+    }
+}
+
+# ============================================================
+#  可选：内网访问时限制来源 IP
+#  location / {
+#      allow 10.0.0.0/8;
+#      deny  all;
+#      proxy_pass http://cisco_backup;
+#  }
+# ============================================================

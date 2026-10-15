@@ -1,0 +1,80 @@
+# ============================================================
+#  Cisco 配置备份中心 - Git 忽略规则
+#  仓库只包含源代码，绝不提交任何凭据与业务数据
+# ============================================================
+
+# ---------- 数据目录（最关键）----------
+# 包含 .secret_key 加密密钥、设备密码、全部备份配置
+data/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+.secret_key
+*.log
+
+# ---------- Python 虚拟环境 ----------
+.venv/
+venv/
+env/
+ENV/
+.python-version
+
+# ---------- Python 缓存 ----------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# ---------- 构建产物 ----------
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# ---------- 配置与密钥（通用保险）----------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+id_rsa*
+secrets*.yml
+secrets*.yaml
+config.local.*
+*.local.json
+
+# 备份中心可能导出的文件
+*.zip
+*.csv
+导出的*.zip
+export_*.zip
+
+# ---------- 编辑器 / IDE ----------
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ---------- 测试与临时产物 ----------
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+coverage.xml
+tests/_*.py
+*.tmp
+
+# ---------- 系统 ----------
+*.bat
+*.cmd
+!deploy/*.sh

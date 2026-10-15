@@ -1,0 +1,52 @@
+[Unit]
+Description=Cisco 配置备份中心
+Documentation=https://github.com/YOUR_NAME/cisco-config-backup
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=cisco-backup
+Group=cisco-backup
+
+# 安装目录与虚拟环境，按 deploy/install_systemd.sh 的实际路径调整
+WorkingDirectory=/opt/cisco-backup
+Environment="PATH=/opt/cisco-backup/.venv/bin"
+Environment="TZ=Asia/Shanghai"
+
+# 初始管理员密码，可留空由程序随机生成
+# 建议：编辑 /etc/cisco-backup/env 文件而非写在这里
+EnvironmentFile=-/etc/cisco-backup/env
+
+ExecStart=/opt/cisco-backup/.venv/bin/python /opt/cisco-backup/run.py --host 0.0.0.0 --port 8077 --no-browser
+
+# 优雅停止
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+# 自动重启
+Restart=always
+RestartSec=10
+
+# 日志走 journald
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cisco-backup
+
+# ---------- 安全加固 ----------
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+ReadWritePaths=/opt/cisco-backup/data
+
+# 资源限制
+MemoryMax=1G
+TasksMax=256
+
+[Install]
+WantedBy=multi-user.target

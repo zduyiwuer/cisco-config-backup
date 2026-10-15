@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cisco 配置备份中心</title>
+<link rel="stylesheet" href="/static/style.css?v=20261015-2">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="logo">◈</span>
+    <div>
+      <h1>Cisco 配置备份中心</h1>
+      <p class="sub">SSH / Telnet 采集 · 配置版本留存 · 差异比对</p>
+    </div>
+  </div>
+  <div class="top-actions">
+    <div class="user-menu" id="user-menu">
+      <button class="btn ghost user-trigger" id="user-trigger">
+        <span class="avatar" id="user-avatar">?</span>
+        <span id="user-name">用户</span>
+        <span class="caret">▾</span>
+      </button>
+      <div class="user-dropdown hidden" id="user-dropdown">
+        <div class="user-info">
+          <div class="user-info-name" id="dd-name">-</div>
+          <div class="user-info-role" id="dd-role">-</div>
+        </div>
+        <button class="user-item" id="btn-change-password">修改密码</button>
+        <button class="user-item" id="btn-users" hidden>用户管理</button>
+        <button class="user-item" id="btn-ad-config" hidden>域账号配置</button>
+        <div class="user-sep"></div>
+        <button class="user-item danger" id="btn-logout">退出登录</button>
+      </div>
+    </div>
+    <button class="btn ghost" id="btn-settings">设置</button>
+    <button class="btn primary" id="btn-backup-all">一键备份全部</button>
+  </div>
+</header>
+
+<nav class="tabs">
+  <button class="tab active" data-tab="devices">设备</button>
+  <button class="tab" data-tab="sites">门店</button>
+  <button class="tab" data-tab="monitor">在线监控</button>
+  <button class="tab" data-tab="history">备份历史</button>
+  <button class="tab" data-tab="neighbors">邻居拓扑</button>
+  <button class="tab" data-tab="export">打包下载</button>
+</nav>
+
+<main>
+  <!--设备 -->
+  <section id="tab-devices" class="tab-panel active">
+    <div class="stats" id="stats"></div>
+    <div class="toolbar">
+      <input type="search" id="device-search" placeholder="搜索设备名 / IP / 备注…">
+      <select id="device-site-filter"><option value="">全部门店</option></select>
+      <select id="device-online-filter">
+        <option value="">全部状态</option>
+        <option value="1">仅在线</option>
+        <option value="0">仅离线</option>
+        <option value="unk">仅未探测</option>
+      </select>
+      <button class="btn ghost" id="btn-probe-now" title="立即探测所有设备在线状态">探测</button>
+      <button class="btn ghost" id="btn-import">导入</button>
+      <button class="btn ghost" id="btn-download-all-top">打包下载</button>
+      <button class="btn primary" id="btn-add">+ 新增设备</button>
+    </div>
+    <div class="card">
+      <table class="grid" id="device-table">
+        <thead>
+          <tr>
+            <th>在线</th><th>设备</th><th>门店</th><th>连接方式</th><th>采集命令</th>
+            <th>定时备份</th><th>最近备份</th><th>操作</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <div class="empty hidden" id="device-empty">还没有设备，点击「新增设备」开始。</div>
+    </div>
+  </section>
+
+  <!-- 在线监控 -->
+  <section id="tab-monitor" class="tab-panel">
+    <div class="stats" id="probe-stats"></div>
+    <div class="toolbar">
+      <span class="toolbar-hint" id="probe-next"></span>
+      <button class="btn ghost" id="btn-probe-refresh">刷新</button>
+      <button class="btn primary" id="btn-probe-all">立即探测全部</button>
+    </div>
+    <div class="card">
+      <table class="grid" id="probe-table">
+        <thead>
+          <tr><th>状态</th><th>设备</th><th>门店</th><th>地址</th><th>延迟</th>
+              <th>最后在线</th><th>连续失败</th><th>失败原因</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <div class="empty hidden" id="probe-empty">暂无设备。</div>
+    </div>
+  </section>
+
+  <!-- 门店 -->
+  <section id="tab-sites" class="tab-panel">
+    <div class="toolbar">
+      <span class="toolbar-hint">按门店归类设备，支持门店级批量备份与打包下载</span>
+      <button class="btn ghost" id="btn-download-all">打包全部备份</button>
+      <button class="btn primary" id="btn-add-site">+ 新增门店</button>
+    </div>
+    <div class="site-grid" id="site-grid"></div>
+    <div class="empty hidden" id="site-empty">还没有门店，点击「新增门店」按门店归类设备。</div>
+  </section>
+
+  <!-- 历史 -->
+  <section id="tab-history" class="tab-panel">
+    <div class="toolbar">
+      <select id="history-device"><option value="">全部设备</option></select>
+      <button class="btn ghost" id="btn-refresh-history">刷新</button>
+    </div>
+    <div class="card">
+      <table class="grid" id="history-table">
+        <thead>
+          <tr><th>时间</th><th>设备</th><th>触发</th><th>结果</th><th>变化</th><th>耗时</th><th>操作</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <div class="empty hidden" id="history-empty">暂无备份记录。</div>
+    </div>
+  </section>
+
+  <!-- 邻居 -->
+  <section id="tab-neighbors" class="tab-panel">
+    <div class="toolbar">
+      <select id="neighbor-device"><option value="">全部设备</option></select>
+    </div>
+    <div class="card" id="neighbor-card">
+      <div class="empty">选择一个设备查看它的 CDP 邻居。</div>
+    </div>
+  </section>
+
+  <!-- 打包下载 -->
+  <section id="tab-export" class="tab-panel">
+    <div class="card export-card">
+      <h3 style="padding:18px 22px 0">打包下载备份文件</h3>
+      <p class="export-desc">
+        把历史备份打包成 zip 下载到本地。包内按
+        <code>&lt;门店&gt;/&lt;设备&gt;/&lt;备份时间&gt;/&lt;命令&gt;.txt</code>
+        组织，并附带 <code>manifest.csv</code> 清单（含门店、设备、命令、时间、SHA256）与各版本差异 <code>.diff</code>。
+      </p>
+      <div class="export-body">
+        <div class="form-grid">
+          <label>下载范围
+            <select id="e-scope">
+              <option value="all">全部设备（所有门店）</option>
+              <option value="site">指定门店</option>
+              <option value="device">指定设备</option>
+            </select>
+          </label>
+          <label>门店<select id="e-site"><option value="">请选择门店</option></select></label>
+          <label>设备<select id="e-device"><option value="">请选择设备</option></select></label>
+          <label>每台设备保留版本数
+            <select id="e-limit">
+              <option value="">全部历史版本</option>
+              <option value="1">仅最新 1 次</option>
+              <option value="3">最近 3 次</option>
+              <option value="7">最近 7 次</option>
+              <option value="30">最近 30 次</option>
+            </select>
+          </label>
+          <label>起始时间<input id="e-since" type="datetime-local"></label>
+          <label>截止时间<input id="e-until" type="datetime-local"></label>
+        </div>
+        <label class="block">导出命令（不选则全部命令）
+          <select id="e-commands" multiple size="4">
+            <option value="show running-config">show running-config</option>
+            <option value="show cdp neighbors detail">show cdp neighbors detail</option>
+          </select>
+        </label>
+        <label class="inline block"><input type="checkbox" id="e-diff" checked> 附带各版本与上一版本的差异 (.diff)</label>
+        <div class="export-preview" id="e-preview">选择范围后显示预计内容</div>
+        <div style="display:flex;gap:10px;margin-top:16px">
+          <button class="btn primary" id="btn-export">下载 zip</button>
+          <button class="btn ghost" id="btn-export-refresh">刷新预览</button>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<!-- 设备弹窗 -->
+<div class="modal hidden" id="device-modal">
+  <div class="modal-box">
+    <div class="modal-head">
+      <h3 id="device-modal-title">新增设备</h3>
+      <button class="icon-btn" data-close>✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-grid">
+        <label>设备名称<input id="f-name" placeholder="core-sw-01" required></label>
+        <label>管理 IP<input id="f-host" placeholder="10.0.0.1" required></label>
+        <label>协议
+          <select id="f-protocol">
+            <option value="ssh">SSH</option>
+            <option value="telnet">Telnet</option>
+          </select>
+        </label>
+        <label>端口<input id="f-port" type="number" placeholder="22 / 23"></label>
+        <label>用户名<input id="f-username" placeholder="cisco"></label>
+        <label>登录密码<input id="f-password" type="password" placeholder="留空则不修改"></label>
+        <label>Enable 密码<input id="f-enable" type="password" placeholder="可选"></label>
+        <label>所属门店<select id="f-site-id"><option value="">未归属</option></select></label>
+      </div>
+      <label class="block">采集命令（每行一条）</label>
+      <textarea id="f-commands" rows="4">show running-config
+show cdp neighbors detail</textarea>
+      <div class="form-grid tight">
+        <label class="inline"><input type="checkbox" id="f-enabled" checked> 参与备份</label>
+        <label class="inline"><input type="checkbox" id="f-scheduled"> 启用定时备份</label>
+        <label>Cron 表达式<input id="f-cron" placeholder="0 2 * * *（每天 02:00）"></label>
+      </div>
+      <label class="block">备注<input id="f-note" placeholder="可选"></label>
+      <div class="modal-msg hidden" id="device-msg"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn ghost" data-close>取消</button>
+      <button class="btn primary" id="btn-save-device">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 门店弹窗 -->
+<div class="modal hidden" id="site-modal">
+  <div class="modal-box">
+    <div class="modal-head">
+      <h3 id="site-modal-title">新增门店</h3>
+      <button class="icon-btn" data-close>✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-grid">
+        <label>门店名称<input id="fs-name" placeholder="上海南京西路店" required></label>
+        <label>门店编号<input id="fs-code" placeholder="SH001"></label>
+        <label>所属区域<input id="fs-region" placeholder="华东 / 华南…"></label>
+        <label>排序值<input id="fs-sort" type="number" value="100"></label>
+      </div>
+      <label class="block">详细地址<input id="fs-address" placeholder="可选"></label>
+      <label class="block">备注<input id="fs-note" placeholder="可选"></label>
+      <div class="modal-msg hidden" id="site-msg"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn ghost" data-close>取消</button>
+      <button class="btn primary" id="btn-save-site">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 导入弹窗 -->
+<div class="modal hidden" id="import-modal">
+  <div class="modal-box wide">
+    <div class="modal-head">
+      <h3>批量导入设备</h3>
+      <button class="icon-btn" data-close>✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="drop-zone" id="drop-zone">
+        <input type="file" id="import-file" accept=".csv,.xlsx,.xlsm,.txt" hidden>
+        <div class="drop-icon">⇪</div>
+        <div class="drop-text">点击选择文件，或把文件拖到这里</div>
+        <div class="drop-hint">支持 Excel（.xlsx，含模板）/ CSV · 单文件 5MB 以内</div>
+        <div class="drop-filename hidden" id="drop-filename"></div>
+      </div>
+      <div class="form-grid tight" style="margin-top:16px">
+        <label class="inline"><input type="radio" name="import-mode" value="create" checked> 仅新增（重名跳过）</label>
+        <label class="inline"><input type="radio" name="import-mode" value="upsert"> 按名称更新</label>
+        <label>默认门店<input id="import-site" placeholder="文件未填门店时使用"></label>
+      </div>
+      <details class="import-help">
+        <summary>支持的列名（点击展开）</summary>
+        <table class="help-table">
+          <tr><th>含义</th><th>可用列名</th><th>必填</th></tr>
+          <tr><td>设备名称</td><td class="mono">设备名称 / name / hostname</td><td class="yes">是</td></tr>
+          <tr><td>管理 IP</td><td class="mono">管理IP / ip / ip_address / host</td><td class="yes">是</td></tr>
+          <tr><td>协议</td><td class="mono">协议 / protocol（ssh 或 telnet）</td><td>否，默认 ssh</td></tr>
+          <tr><td>端口</td><td class="mono">端口 / port</td><td>否，按协议自动补</td></tr>
+          <tr><td>用户名</td><td class="mono">用户名 / username</td><td>否</td></tr>
+          <tr><td>登录密码</td><td class="mono">登录密码 / 密码 / password</td><td class="yes">新增时必填</td></tr>
+          <tr><td>Enable密码</td><td class="mono">Enable密码 / enable_password</td><td>否</td></tr>
+          <tr><td>门店</td><td class="mono">门店 / site（不存在会自动创建）</td><td>否</td></tr>
+          <tr><td>定时备份</td><td class="mono">定时备份（是/否/1/0/true）</td><td>否</td></tr>
+          <tr><td>Cron</td><td class="mono">cron / Cron表达式</td><td>否，默认每天 02:00</td></tr>
+          <tr><td>采集命令</td><td class="mono">采集命令（分号分隔多行）</td><td>否</td></tr>
+          <tr><td>备注</td><td class="mono">备注 / note</td><td>否</td></tr>
+        </table>
+        <p class="help-note">
+          提示：不确定格式时，先「下载模板」照着填最省事。中文表头与英文表头都能识别，
+          Excel 导出的 UTF-8 / GBK 编码 CSV 均支持。
+        </p>
+      </details>
+      <div class="import-result hidden" id="import-result"></div>
+      <div class="modal-msg hidden" id="import-msg"></div>
+    </div>
+    <div class="modal-foot">
+      <div class="template-btns">
+        <button class="btn ghost" id="btn-download-template">下载 Excel 模板</button>
+        <button class="btn ghost" id="btn-download-template-csv">下载 CSV 模板</button>
+      </div>
+      <button class="btn ghost" data-close>取消</button>
+      <button class="btn primary" id="btn-do-import" disabled>开始导入</button>
+    </div>
+  </div>
+</div>
+
+<!-- 详情/差异弹窗 -->
+<div class="modal hidden" id="detail-modal">
+  <div class="modal-box wide">
+    <div class="modal-head">
+      <h3 id="detail-title">备份详情</h3>
+      <button class="icon-btn" data-close>✕</button>
+    </div>
+    <div class="modal-body" id="detail-body"></div>
+    <div class="modal-foot">
+      <a class="btn ghost" id="btn-download-zip" download>下载本次全部 (zip)</a>
+      <button class="btn primary" data-close>关闭</button>
+    </div>
+  </div>
+</div>
+
+<!-- 修改密码弹窗 -->
+<div class="modal hidden" id="pwd-modal">
+  <div class="modal-box">
+    <div class="modal-head">
+      <h3>修改密码</h3>
+      <button class="icon-btn" data-close>✕</button>
+    </div>
+    <div class="modal-body">
+      <label class="block">原密码<input id="p-old" type="password" autocomplete="current-password"></label>
+      <label class="block">新密码<input id="p-new" type="password" autocomplete="new-password"></label>
+      <div class="pwd-strength" id="pwd-strength"></div>
+      <label class="block">确认新密码<input id="p-new2" type="password" autocomplete="new-password"></label>
+      <p class="help-note">密码至少 8 位，需同时包含字母和数字。</p>
+      <div class="modal-msg hidden" id="pwd-msg"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn ghost" data-close>取消</button>
+      <button class="btn primary" id="btn-save-pwd">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 用户管理弹窗 -->
+<div class="modal hidden" id="users-modal">
+  <div class="modal-box wide">
+    <div class="modal-head">
+      <h3>用户管理</h3>
+      <button class="icon-btn" data-close>✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="toolbar">
+        <span class="toolbar-hint">角色：管理员可管理全部；操作员可增删改设备与备份；只读仅查看与导出</span>
+        <button class="btn primary" id="btn-add-user">+ 新增用户</button>
+      </div>
+      <table class="grid" id="users-table">
+        <thead><tr><th>用户</th><th>来源</th><th>角色</th><th>状态</th><th>最近登录</th><th>操作</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <hr class="form-sep">
+      <h4 class="form-title">新增用户</h4>
+      <div class="form-grid">
+        <label>用户名<input id="nu-username" placeholder="zhangsan"></label>
+        <label>初始密码<input id="nu-password" type="password" placeholder="至少8位，含字母和数字"></label>
+        <label>角色
+          <select id="nu-role">
+            <option value="operator">操作员（可备份、改设备）</option>
+            <option value="viewer">只读（仅查看与导出）</option>
+            <option value="admin">管理员（含用户与系统设置）</option>
+          </select>
+        </label>
+        <label>显示名<input id="nu-display" placeholder="张三（可选）"></label>
+      </div>
+      <div class="modal-msg hidden" id="users-msg"></div>
+    </div>
+    <div class="modal-foot"><button class="btn primary" data-close>关闭</button></div>
+  </div>
+</div>
+
+<!-- 域账号配置弹窗 -->
+<div class="modal hidden" id="ad-modal">
+  <div class="modal-box wide">
+    <div class="modal-head">
+      <h3>域账号（AD / LDAP）配置</h3>
+      <button class="icon-btn" data-close>✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-grid tight" style="margin-bottom:16px">
+        <label class="inline"><input type="checkbox" id="ad-enabled"> 启用域账号登录</label>
+        <label class="inline"><input type="checkbox" id="ad-ssl"> 使用 LDAPS（636，加密，推荐）</label>
+        <label class="inline"><input type="checkbox" id="ad-ntlm"> 使用 NTLM</label>
+      </div>
+      <div class="form-grid">
+        <label>域服务器地址<input id="ad-host" placeholder="dc01.corp.local"></label>
+        <label>端口<input id="ad-port" type="number" placeholder="636"></label>
+        <label>域名<input id="ad-domain" placeholder="corp.local"></label>
+        <label>搜索基准 DN<input id="ad-base-dn" placeholder="OU=Users,DC=corp,DC=local"></label>
+        <label>绑定账号（服务账号）<input id="ad-bind-dn" placeholder="CN=svc-backup,DC=corp,DC=local"></label>
+        <label>绑定密码<input id="ad-bind-pw" type="password" placeholder="留空则不修改"></label>
+        <label>绑定方式
+          <select id="ad-strategy">
+            <option value="search">搜索后绑定（推荐）</option>
+            <option value="direct">直接绑定</option>
+          </select>
+        </label>
+        <label>管理员组<input id="ad-admin-group" placeholder="CN=NetOps,DC=corp,DC=local"></label>
+        <label>其他用户默认角色
+          <select id="ad-default-role">
+            <option value="viewer">只读</option>
+            <option value="operator">操作员</option>
+            <option value="admin">管理员</option>
+          </select>
+        </label>
+        <label>CA 证书路径<input id="ad-ca" placeholder="域控自签名证书时填写"></label>
+      </div>
+      <label class="inline block"><input type="checkbox" id="ad-plaintext"> 允许明文 LDAP（389）传输密码（不推荐）</label>
+      <div class="ad-preview" id="ad-preview"></div>
+      <div class="modal-msg hidden" id="ad-msg"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn ghost" id="btn-test-ad">测试连接</button>
+      <button class="btn primary" id="btn-save-ad">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 设置弹窗 -->
+<div class="modal hidden" id="settings-modal">
+  <div class="modal-box">
+    <div class="modal-head">
+      <h3>全局设置</h3>
+      <button class="icon-btn" data-close>✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-grid">
+        <label>并发设备数<input id="s-concurrency" type="number" min="1" max="32"></label>
+        <label>连接超时(秒)<input id="s-connect" type="number" min="3" max="120"></label>
+        <label>命令超时(秒)<input id="s-command" type="number" min="5" max="300"></label>
+        <label>保留版本数<input id="s-keep" type="number" min="1" max="500"></label>
+      </div>
+      <label class="inline block"><input type="checkbox" id="s-paging"> 自动发送 terminal length 0 关闭分页</label>
+      <hr class="form-sep">
+      <h4 class="form-title">在线探测</h4>
+      <div class="form-grid">
+        <label class="inline"><input type="checkbox" id="s-probe"> 启用定时探测</label>
+        <label>探测间隔(分钟)<input id="s-probe-interval" type="number" min="1" max="1440"></label>
+        <label>探测超时(秒)<input id="s-probe-timeout" type="number" min="1" max="60"></label>
+      </div>
+      <p class="help-note" style="margin:0 0 14px">
+        探测只做 TCP 连接（SSH 额外校验 banner），不做完整认证，开销极低，不影响备份任务。
+      </p>
+      <label class="block">新设备默认命令（每行一条）</label>
+      <textarea id="s-commands" rows="4"></textarea>
+      <div class="modal-msg hidden" id="settings-msg"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn ghost" data-close>取消</button>
+      <button class="btn primary" id="btn-save-settings">保存</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast hidden" id="toast"></div>
+<script src="/static/app.js?v=20261015-2"></script>
+</body>
+</html>

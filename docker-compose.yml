@@ -1,0 +1,45 @@
+# ============================================================
+#  Cisco 配置备份中心 - Docker Compose 部署
+#  启动：docker compose up -d
+#  查看：docker compose logs -f
+#  停止：docker compose down
+#  数据：备份文件与数据库保存在 ./data 目录，容器重建不会丢
+# ============================================================
+
+services:
+  cisco-backup:
+    build: .
+    image: cisco-config-backup:latest
+    container_name: cisco-backup
+    restart: unless-stopped
+
+    ports:
+      # 左侧端口可改： "9000:8077"
+      - "8077:8077"
+
+    environment:
+      # 初始管理员密码。首次启动生效，之后请在界面里改掉。
+      # 留空则自动生成随机密码并打印在容器日志里
+      CBS_ADMIN_PASSWORD: "${CBS_ADMIN_PASSWORD:-}"
+      TZ: "Asia/Shanghai"
+
+    volumes:
+      # 数据库、加密密钥、备份文件都挂在这里
+      - ./data:/app/data
+
+    # 设备在线探测与备份需要访问交换机网络，按需放开
+    # extra_hosts:
+    #   - "switch.local:192.168.1.10"
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8077/api/health"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
