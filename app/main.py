@@ -770,9 +770,43 @@ def api_neighbors(device_id: int) -> dict[str, Any]:
 # ------------------------------------------------------------------- backups
 @app.get("/api/backups")
 def api_list_backups(
-    device_id: int | None = None, limit: int = 100, offset: int = 0
+    request: Request,
+    device_id: int | None = None,
+    limit: int = 100,
+    offset: int = 0,
+    status: str | None = None,
+    trigger: str | None = None,
+    changed: str | None = None,
+    site_id: int | None = None,
+    since: str | None = None,
+    until: str | None = None,
 ) -> list[dict[str, Any]]:
-    return db.list_backups(device_id=device_id, limit=min(limit, 500), offset=offset)
+    """备份历史查询，支持按状态（含失败）、触发方式、门店、变化与否、时间范围筛选。"""
+    require_role(request, "viewer")
+    if status and status not in ("success", "failed", "running"):
+        raise HTTPException(status_code=400, detail="status 只能是 success/failed/running")
+    return db.list_backups(
+        device_id=device_id,
+        limit=min(limit, 1000),
+        offset=offset,
+        status=status,
+        trigger=trigger,
+        changed=changed,
+        site_id=site_id,
+        since=since,
+        until=until,
+    )
+
+
+@app.get("/api/backups/stats")
+def api_backup_stats(
+    request: Request,
+    device_id: int | None = None,
+    site_id: int | None = None,
+) -> dict[str, Any]:
+    """备份统计：成功/失败计数、失败原因 Top、失败设备排行。"""
+    require_role(request, "viewer")
+    return db.backup_stats(device_id=device_id, site_id=site_id)
 
 
 @app.post("/api/backups")

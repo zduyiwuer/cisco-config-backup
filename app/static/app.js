@@ -943,7 +943,7 @@ $('#device-online-filter').addEventListener('change', (e) => renderDevices($('#d
 
 async function refreshAll() {
   await Promise.all([loadSites(), loadDevices()]);
-  loadHistory();
+  await refreshHistory();
   loadProbe();
 }
 
@@ -1025,29 +1025,213 @@ function showMsg(sel, text, kind) {
 }
 
 /* ----------------------------------------------------------------- 历史 */
+const HISTORY_PAGE_SIZE = 50;
+const historyState = { page: 0, loading: false };
+
+/** 收集历史页当前筛选条件 */
+function historyFilters() {
+  const f = {
+    device_id: $('#history-device').value,
+    site_id: $('#history-site').value,
+    status: $('#history-status').value,
+    trigger: $('#history-trigger').value,
+    changed: $('#history-changed').value,
+    since: $('#history-since').value,
+    until: $('#history-until').value,
+  };
+  // 空值不参与请求
+  Object.keys(f).forEach((k) => { if (f[k] === '' || f[k] === null) delete f[k]; });
+  // 日期转 ISO；until 取当天 23:59:59，否则当天记录会被排除
+  if (f.since) f.since = new Date(f.since + 'T00:00:00').toISOString();
+  if (f.until) f.until = new Date(f.until + 'T23:59:59').toISOString();
+  return f;
+}
+
+function hasHistoryFilter() {
+  return Object.keys(historyFilters()).length > 0;
+}
+
+function renderFilterNote() {
+  const labels = [];
+  const f = historyFilters();
+  if (f.status === 'failed') labels.push('仅失败');
+  if (f.status === 'success') labels.push('仅成功');
+  if (f.trigger) labels.push(f.trigger === 'schedule' ? '定时触发' : '手动触发');
+  if (f.changed === '1') labels.push('配置有变化');
+  if (f.changed === '0') labels.push('配置无变化');
+  if (f.since || f.until) {
+    labels.push(`${f.since ? $('#history-since').value : '最早'} ~ ${f.until ? $('#history-until').value : '最新'}`);
+  }
+  const el = $('#filter-note');
+  if (labels.length) {
+    el.innerHTML = `已筛选：<b>${esc(labels.join(' · '))}</b>`;
+    el.classList.remove('hidden');
+  } else {
+    el.classList.add('hidden');
+  }
+}
+
+async function loadHistoryStats() {
+  const f = historyFilters();
+  const qs = new URLSearchParams();
+  if (f.device_id) qs.set('device_id', f.device_id);
+  if (f.site_id) qs.set('site_id', f.site_id);
+  let stats;
+  try {
+    stats = await api('/api/backups/stats?' + qs.toString());
+  } catch (e) {
+    $('#history-stats').innerHTML = '';
+    return;
+  }
+  $('#history-stats').innerHTML = `
+    <div class="stat"><div class="label">备份总次数</div><div class="value">${stats.total}</div></div>
+    <div class="stat ok"><div class="label">成功</div><div class="value">${stats.success}</div></div>
+    <div class="stat err"><div class="label">失败</div><div class="value">${stats.failed}</div></div>
+    <div class="stat"><div class="label">成功率</div>
+      <div class="value">${stats.total ? ((stats.success / stats.total) * 100).toFixed(1) : '0.0'}<span style="font-size:14px">%</span></div></div>`;
+
+  // 失败原因汇总面板
+  const panel = $('#failure-panel');
+  const reasons = stats.failure_reasons || [];
+  if (!stats.failed || !reasons.length) {
+    panel.classList.add('hidden');
+    return;
+  }
+  panel.classList.remove('hidden');
+  const max = reasons[0].count;
+  $('#failure-body').innerHTML = `
+    <div class="fail-col">
+      <div class="fail-col-title">常见失败原因</div>
+      ${reasons.map((r) => `
+        <div class="reason-row" title="${esc(r.error)}">
+          <div class="reason-text">${esc(r.error)}</div>
+          <div class="reason-bar"><div class="reason-fill" style="width:${(r.count / max) * 100}%"></div></div>
+          <div class="reason-count">${r.count}</div>
+        </div>`).join('')}
+    </div>
+    <div class="fail-col">
+      <div class="fail-col-title">失败次数最多的设备</div>
+      ${(stats.failing_devices || []).slice(0, 6).map((d) => `
+        <div class="fail-device">
+          <span class="dev-name">${esc(d.name)}</span>
+          <span class="dev-host">${esc(d.host)}</span>
+          <span class="pill err">${d.failed_count} 次</span>
+        </div>`).join('') || '<div class="dev-host">无</div>'}
+    </div>`;
+}
+
 async function loadHistory() {
-  const did = $('#history-device').value;
-  const rows = await api(`/api/backups?limit=200${did ? `&device_id=${did}` : ''}`);
+  if (historyState.loading) return;
+  historyState.loading = true;
+  const f = historyFilters();
+  const qs = new URLSearchParams({ limit: HISTORY_PAGE_SIZE, offset: historyState.page * HISTORY_PAGE_SIZE });
+  Object.entries(f).forEach(([k, v]) => qs.set(k, v));
+
+  renderFilterNote();
+  let rows = [];
+  let stats = { total: 0, failed: 0 };
+  try {
+    [rows, stats] = await Promise.all([
+      api('/api/backups?' + qs.toString()),
+      api('/api/backups/stats?' + new URLSearchParams(
+        f.device_id || f.site_id ? { ...(f.device_id ? { device_id: f.device_id } : {}),
+                                     ...(f.site_id ? { site_id: f.site_id } : {}) }
+                                : {}
+      ).toString()).catch(() => ({ total: 0, failed: 0 })),
+    ]);
+  } catch (e) {
+    toast('加载备份历史失败：' + e.message, 'err');
+    historyState.loading = false;
+    return;
+  }
+
   const tb = $('#history-table tbody');
   $('#history-empty').classList.toggle('hidden', rows.length > 0);
   $('#history-table').classList.toggle('hidden', rows.length === 0);
-  tb.innerHTML = rows
-    .map((b) => {
-      const res = b.status === 'success'
-        ? '<span class="pill ok">成功</span>'
-        : `<span class="pill err" title="${esc(b.error || '')}">失败</span>`;
-      return `<tr>
-        <td class="mono">${fmtTime(b.started_at)}</td>
-        <td><div class="dev-name">${esc(b.device_name)}</div><div class="dev-host">${esc(b.host)}</div></td>
-        <td><span class="pill">${b.trigger === 'schedule' ? '定时' : '手动'}</span></td>
-        <td>${res}</td>
-        <td>${b.status === 'success' ? (b.changed ? '<span class="pill new">有变化</span>' : '<span class="pill">无变化</span>') : '—'}</td>
-        <td class="mono">${b.duration_ms != null ? b.duration_ms + ' ms' : '—'}</td>
-        <td><button class="btn small act-view" data-id="${b.id}">详情</button></td>
-      </tr>`;
-    })
-    .join('');
+  $('#history-empty').textContent = hasHistoryFilter()
+    ? '当前筛选条件下没有备份记录。'
+    : '暂无备份记录。';
+
+  tb.innerHTML = rows.map((b) => {
+    const failed = b.status !== 'success';
+    const res = b.status === 'success'
+      ? '<span class="pill ok">成功</span>'
+      : `<span class="pill err">${b.status === 'running' ? '进行中' : '失败'}</span>`;
+    const change = b.status === 'success'
+      ? (b.changed ? '<span class="pill new">有变化</span>' : '<span class="pill">无变化</span>')
+      : '—';
+    // 失败原因直接展示在表格里，不再藏在 tooltip
+    const reason = failed && b.error
+      ? `<div class="fail-reason" title="${esc(b.error)}">${esc(b.error)}</div>`
+      : (b.os_version ? `<div class="dev-host">${esc(b.os_version)}</div>` : '');
+    return `<tr class="${failed ? 'row-failed' : ''}">
+      <td class="mono">${fmtTime(b.started_at)}</td>
+      <td><div class="dev-name">${esc(b.device_name)}</div><div class="dev-host">${esc(b.host)}</div></td>
+      <td>${b.site ? `<span class="pill">${esc(b.site)}</span>` : '<span class="pill">未归属</span>'}</td>
+      <td><span class="pill">${b.trigger === 'schedule' ? '定时' : '手动'}</span></td>
+      <td>${res}</td>
+      <td>${change}</td>
+      <td class="mono">${b.duration_ms != null ? b.duration_ms + ' ms' : '—'}</td>
+      <td style="max-width:280px">${reason}</td>
+      <td><button class="btn small act-view" data-id="${b.id}">详情</button></td>
+    </tr>`;
+  }).join('');
+
+  // 分页
+  const pager = $('#history-pager');
+  const shownEnd = historyState.page * HISTORY_PAGE_SIZE + rows.length;
+  pager.classList.toggle('hidden', stats.total <= HISTORY_PAGE_SIZE);
+  $('#history-page-info').textContent =
+    `${historyState.page * HISTORY_PAGE_SIZE + 1}-${shownEnd} / ${stats.total}`;
+  $('#btn-history-prev').disabled = historyState.page === 0;
+  $('#btn-history-next').disabled = shownEnd >= stats.total;
+  historyState.loading = false;
 }
+
+/** 刷新统计 + 列表 */
+async function refreshHistory() {
+  historyState.page = 0;
+  await loadHistoryStats();
+  await loadHistory();
+}
+
+// 各筛选器联动
+['#history-device', '#history-site', '#history-status', '#history-trigger',
+ '#history-changed', '#history-since', '#history-until'].forEach((sel) => {
+  const el = $(sel);
+  if (!el) return;
+  el.addEventListener('change', () => {
+    historyState.page = 0;
+    loadHistoryStats();
+    loadHistory();
+  });
+});
+
+$('#btn-clear-history-filter').addEventListener('click', () => {
+  ['#history-device', '#history-site', '#history-status', '#history-trigger',
+   '#history-changed', '#history-since', '#history-until'].forEach((sel) => {
+    const el = $(sel);
+    if (el) el.value = '';
+  });
+  historyState.page = 0;
+  loadHistoryStats();
+  loadHistory();
+  toast('已清除筛选条件', 'ok');
+});
+
+$('#failure-panel').addEventListener('click', (e) => {
+  if (e.target.classList.contains('act-show-failed')) {
+    $('#history-status').value = 'failed';
+    historyState.page = 0;
+    loadHistoryStats();
+    loadHistory();
+  }
+});
+
+$('#btn-history-prev').addEventListener('click', () => {
+  if (historyState.page > 0) { historyState.page--; loadHistory(); }
+});
+$('#btn-history-next').addEventListener('click', () => { historyState.page++; loadHistory(); });
 
 $('#history-table').addEventListener('click', async (e) => {
   const btn = e.target.closest('.act-view');
@@ -1123,6 +1307,14 @@ function fillDeviceSelects() {
     state.devices.map((d) => `<option value="${d.id}">${esc(d.name)}${d.site ? ' · ' + esc(d.site) : ''}</option>`).join('');
   $('#history-device').innerHTML = opts;
   $('#neighbor-device').innerHTML = opts;
+
+  // 历史页门店筛选（保留当前选择，避免刷新后重置）
+  const curSite = $('#history-site').value;
+  $('#history-site').innerHTML = '<option value="">全部门店</option>' +
+    state.sites.map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join('') +
+    '<option value="0">仅未归属设备</option>';
+  $('#history-site').value = curSite;
+
   const curExport = $('#e-device').value;
   $('#e-device').innerHTML = '<option value="">请选择设备</option>' +
     state.devices.map((d) => `<option value="${d.id}">${esc(d.site ? d.site + ' / ' : '')}${esc(d.name)}</option>`).join('');
@@ -1173,7 +1365,7 @@ $('#btn-add').addEventListener('click', async () => {
   openDeviceModal(null);
 });
 $('#btn-settings').addEventListener('click', openSettings);
-$('#btn-refresh-history').addEventListener('click', loadHistory);
+$('#btn-refresh-history').addEventListener('click', refreshHistory);
 $('#btn-backup-all').addEventListener('click', async () => {
   if (!state.devices.length) return toast('请先添加设备', 'err');
   if (!confirm(`开始对 ${state.devices.length} 台设备执行备份？`)) return;
@@ -1217,7 +1409,7 @@ loadMe();
 loadVendors();
 loadSites();
 loadDevices();
-loadHistory();
+refreshHistory();
 loadProbe();
 // 页面可见时每 30 秒静默刷新一次设备状态
 setInterval(() => {

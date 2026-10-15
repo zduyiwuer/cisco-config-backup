@@ -859,20 +859,124 @@ def finish_backup(
 
 
 def list_backups(
-    device_id: int | None = None, limit: int = 100, offset: int = 0
+    device_id: int | None = None,
+    limit: int = 100,
+    offset: int = 0,
+    status: str | None = None,
+    trigger: str | None = None,
+    changed: str | None = None,
+    site_id: int | None = None,
+    since: str | None = None,
+    until: str | None = None,
 ) -> list[dict[str, Any]]:
+    """备份历史查询。
+
+    status: success / failed / running
+    changed: 1（有变化）/ 0（无变化）
+    site_id: 传 0 表示未归属门店的设备
+    """
     conn = get_conn()
     sql = (
-        "SELECT b.*, d.name AS device_name, d.host AS device_host "
-        "FROM backups b JOIN devices d ON d.id = b.device_id"
+        "SELECT b.*, d.name AS device_name, d.host AS device_host, d.site, d.site_id, "
+        "s.name AS site_name "
+        "FROM backups b JOIN devices d ON d.id = b.device_id "
+        "LEFT JOIN sites s ON s.id = d.site_id"
     )
+    clauses: list[str] = []
     params: list[Any] = []
+
     if device_id:
-        sql += " WHERE b.device_id = ?"
+        clauses.append("b.device_id = ?")
         params.append(device_id)
+    if site_id is not None:
+        if site_id == 0:
+            clauses.append("d.site_id IS NULL")
+        else:
+            clauses.append("d.site_id = ?")
+            params.append(site_id)
+    if status:
+        clauses.append("b.status = ?")
+        params.append(status)
+    if trigger:
+        clauses.append("b.trigger = ?")
+        params.append(trigger)
+    if changed in ("0", "1"):
+        # 只对成功的备份做变化筛选：失败的备份没有"配置是否变化"的概念
+        clauses.append("b.changed = ? AND b.status = 'success'")
+        params.append(int(changed))
+    if since:
+        clauses.append("b.started_at >= ?")
+        params.append(since)
+    if until:
+        clauses.append("b.started_at <= ?")
+        params.append(until)
+
+    if clauses:
+        sql += " WHERE " + " AND ".join(clauses)
     sql += " ORDER BY b.id DESC LIMIT ? OFFSET ?"
     params.extend([limit, offset])
     return [dict(r) for r in conn.execute(sql, params).fetchall()]
+
+
+def backup_stats(
+    device_id: int | None = None, site_id: int | None = None
+) -> dict[str, Any]:
+    """备份统计，用于历史页顶部概览与失败汇总。"""
+    conn = get_conn()
+    sql = (
+        "SELECT b.status, COUNT(*) AS c FROM backups b "
+        "JOIN devices d ON d.id = b.device_id LEFT JOIN sites s ON s.id = d.site_id"
+    )
+    clauses, params = [], []
+    if device_id:
+        clauses.append("b.device_id = ?")
+        params.append(device_id)
+    if site_id is not None:
+        if site_id == 0:
+            clauses.append("d.site_id IS NULL")
+        else:
+            clauses.append("d.site_id = ?")
+            params.append(site_id)
+    if clauses:
+        sql += " WHERE " + " AND ".join(clauses)
+    sql += " GROUP BY b.status"
+
+    counts = {"success": 0, "failed": 0, "running": 0}
+    for row in conn.execute(sql, params).fetchall():
+        counts[row["status"]] = row["c"]
+
+    # 失败原因 Top 5，便于快速定位共性问题（如密码错误、认证失败）
+    fail_sql = (
+        "SELECT b.error, COUNT(*) AS c FROM backups b "
+        "JOIN devices d ON d.id = b.device_id LEFT JOIN sites s ON s.id = d.site_id"
+        + (" WHERE " + " AND ".join(clauses + ["b.status = 'failed'"])
+           if clauses else " WHERE b.status = 'failed'")
+        + " AND b.error IS NOT NULL AND TRIM(b.error) != '' "
+        "GROUP BY b.error ORDER BY c DESC LIMIT 5"
+    )
+    reasons = [
+        {"error": r["error"], "count": r["c"]}
+        for r in conn.execute(fail_sql, params).fetchall()
+    ]
+
+    # 连续失败的设备（最近 3 次里有失败），优先排查对象
+    device_sql = """
+        SELECT d.id, d.name, d.host, COUNT(*) AS failed_count
+        FROM backups b JOIN devices d ON d.id = b.device_id
+        WHERE b.status = 'failed'
+        GROUP BY d.id
+        HAVING failed_count > 0
+        ORDER BY failed_count DESC, d.name
+        LIMIT 20
+    """
+    failing = [dict(r) for r in conn.execute(device_sql).fetchall()]
+
+    return {
+        "total": sum(counts.values()),
+        **counts,
+        "failure_reasons": reasons,
+        "failing_devices": failing,
+    }
 
 
 def get_backup(backup_id: int) -> dict[str, Any] | None:

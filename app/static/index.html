@@ -113,18 +113,57 @@
 
   <!-- 历史 -->
   <section id="tab-history" class="tab-panel">
+    <div class="stats" id="history-stats"></div>
+
+    <!-- 失败原因汇总：只在有失败时出现 -->
+    <div class="card failure-panel hidden" id="failure-panel">
+      <div class="failure-head">
+        <h3>失败排查</h3>
+        <button class="btn small act-show-failed">只看失败记录</button>
+      </div>
+      <div class="failure-body" id="failure-body"></div>
+    </div>
+
     <div class="toolbar">
       <select id="history-device"><option value="">全部设备</option></select>
+      <select id="history-site"><option value="">全部门店</option></select>
+      <select id="history-status">
+        <option value="">全部结果</option>
+        <option value="failed">仅失败</option>
+        <option value="success">仅成功</option>
+        <option value="running">进行中</option>
+      </select>
+      <select id="history-trigger">
+        <option value="">全部触发</option>
+        <option value="manual">手动</option>
+        <option value="schedule">定时</option>
+      </select>
+      <select id="history-changed">
+        <option value="">全部结果</option>
+        <option value="1">配置有变化</option>
+        <option value="0">配置无变化</option>
+      </select>
+      <input type="date" id="history-since" title="起始日期">
+      <span class="range-sep">→</span>
+      <input type="date" id="history-until" title="截止日期">
+      <button class="btn ghost" id="btn-clear-history-filter">清除筛选</button>
       <button class="btn ghost" id="btn-refresh-history">刷新</button>
     </div>
+    <div class="filter-note hidden" id="filter-note"></div>
+
     <div class="card">
       <table class="grid" id="history-table">
         <thead>
-          <tr><th>时间</th><th>设备</th><th>触发</th><th>结果</th><th>变化</th><th>耗时</th><th>操作</th></tr>
+          <tr><th>时间</th><th>设备</th><th>门店</th><th>触发</th><th>结果</th><th>变化</th><th>耗时</th><th>说明</th><th>操作</th></tr>
         </thead>
         <tbody></tbody>
       </table>
       <div class="empty hidden" id="history-empty">暂无备份记录。</div>
+      <div class="pager hidden" id="history-pager">
+        <button class="btn small" id="btn-history-prev">上一页</button>
+        <span id="history-page-info">-</span>
+        <button class="btn small" id="btn-history-next">下一页</button>
+      </div>
     </div>
   </section>
 
