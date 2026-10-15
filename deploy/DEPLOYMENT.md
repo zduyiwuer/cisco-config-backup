@@ -23,7 +23,7 @@ sudo systemctl enable --now docker
 ### 部署
 
 ```bash
-git clone https://github.com/YOUR_NAME/cisco-config-backup.git
+git clone https://github.com/zduyiwuer/cisco-config-backup.git
 cd cisco-config-backup
 
 # 可选：预设管理员密码（留空则自动生成随机密码）
@@ -83,7 +83,7 @@ tar czf cisco-backup-data-$(date +%Y%m%d).tar.gz data/
 ### 一键安装
 
 ```bash
-git clone https://github.com/YOUR_NAME/cisco-config-backup.git
+git clone https://github.com/zduyiwuer/cisco-config-backup.git
 cd cisco-config-backup
 sudo ./deploy/install_systemd.sh
 ```

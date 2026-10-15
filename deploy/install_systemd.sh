@@ -67,7 +67,7 @@ if [[ "$INSTALL_DIR" == "$(dirname "$(readlink -f "$0")")/.." ]]; then
     }
 else
     info "克隆仓库到 ${INSTALL_DIR}"
-    git clone https://github.com/YOUR_NAME/cisco-config-backup.git "$INSTALL_DIR"
+    git clone https://github.com/zduyiwuer/cisco-config-backup.git "$INSTALL_DIR"
 fi
 
 mkdir -p "$INSTALL_DIR/data"

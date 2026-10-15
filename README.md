@@ -35,7 +35,7 @@
 #### Docker（推荐）
 
 ```bash
-git clone https://github.com/YOUR_NAME/cisco-config-backup.git
+git clone https://github.com/zduyiwuer/cisco-config-backup.git
 cd cisco-config-backup
 cp .env.example .env      # 可选：预设管理员密码
 vim .env
