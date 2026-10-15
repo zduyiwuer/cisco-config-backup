@@ -61,6 +61,14 @@
         <option value="0">仅离线</option>
         <option value="unk">仅未探测</option>
       </select>
+      <select id="device-backup-filter">
+        <option value="">全部备份结果</option>
+        <option value="failed">最近备份失败</option>
+        <option value="success">最近备份成功</option>
+        <option value="ever_failed">曾备份失败</option>
+        <option value="never">从未备份</option>
+        <option value="changed">配置有变化</option>
+      </select>
       <button class="btn ghost" id="btn-probe-now" title="立即探测所有设备在线状态">探测</button>
       <button class="btn ghost" id="btn-import">导入</button>
       <button class="btn ghost" id="btn-download-all-top">打包下载</button>

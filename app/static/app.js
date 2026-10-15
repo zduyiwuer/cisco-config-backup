@@ -432,30 +432,65 @@ $('#btn-fill-default-cmds').addEventListener('click', () => {
 
 function renderStats() {
   const total = state.devices.length;
-  const ok = state.devices.filter((d) => d.last_status === 'success').length;
-  const err = state.devices.filter((d) => d.last_status === 'failed').length;
+  const failedDevices = state.devices.filter((d) => d.last_status === 'failed').length;
+  const okDevices = state.devices.filter((d) => d.last_status === 'success').length;
+  const neverBackup = state.devices.filter((d) => !d.last_backup_at).length;
   const sch = state.devices.filter((d) => d.schedule_enabled && d.enabled).length;
-  const unassigned = state.devices.filter((d) => !d.site_id).length;
   const online = state.devices.filter((d) => d.online === 1).length;
   const offline = state.devices.filter((d) => d.online === 0).length;
   $('#stats').innerHTML = `
     <div class="stat"><div class="label">设备总数</div><div class="value">${total}</div></div>
     <div class="stat ok"><div class="label">在线 / 离线</div><div class="value">${online}<span style="font-size:15px;color:var(--err)"> / ${offline}</span></div></div>
     <div class="stat brand"><div class="label">门店数</div><div class="value">${state.sites.length}</div></div>
-    <div class="stat err"><div class="label">最近失败</div><div class="value">${err}<span style="font-size:14px;color:var(--text-mute)"> / ${ok}</span></div></div>
-    <div class="stat"><div class="label">定时/未归属</div><div class="value">${sch}<span style="font-size:15px;color:var(--text-mute)"> / ${unassigned}</span></div></div>`;
+    <div class="stat ok"><div class="label">备份成功</div><div class="value">${okDevices}</div></div>
+    <div class="stat err stat-clickable" id="stat-failed" title="点击筛选出备份失败的设备">
+      <div class="label">备份失败</div><div class="value">${failedDevices}</div>
+      ${failedDevices ? '<div class="stat-hint">点击筛选</div>' : ''}
+    </div>
+    <div class="stat"><div class="label">未备份 / 定时</div><div class="value">${neverBackup}<span style="font-size:15px;color:var(--text-mute)"> / ${sch}</span></div></div>`;
+
+  const el = $('#stat-failed');
+  if (el && failedDevices) {
+    el.addEventListener('click', () => {
+      $('#device-backup-filter').value = 'failed';
+      renderDevices($('#device-search').value);
+      toast(`已筛选出 ${failedDevices} 台备份失败的设备`, 'ok');
+    });
+  }
+}
+
+/** 备份结果筛选：基于设备接口返回的 summary，无需额外请求 */
+function matchBackupFilter(d, mode) {
+  if (!mode) return true;
+  const s = d.summary || {};
+  switch (mode) {
+    case 'failed':       // 最近一次备份失败
+      return d.last_status === 'failed';
+    case 'success':      // 最近一次备份成功
+      return d.last_status === 'success';
+    case 'ever_failed':  // 历史上出现过失败
+      return (s.failed || 0) > 0;
+    case 'never':        // 从未备份
+      return !d.last_backup_at;
+    case 'changed':      // 出现过配置变化
+      return (s.changed || 0) > 0;
+    default:
+      return true;
+  }
 }
 
 function renderDevices(filter = '') {
   const kw = filter.trim().toLowerCase();
   const siteFilter = $('#device-site-filter').value;
   const onFilter = $('#device-online-filter').value;
+  const bkFilter = $('#device-backup-filter').value;
   const rows = state.devices.filter((d) => {
     if (siteFilter === 'none' && d.site_id) return false;
     if (siteFilter && siteFilter !== 'none' && String(d.site_id) !== siteFilter) return false;
     if (onFilter === '1' && d.online !== 1) return false;
     if (onFilter === '0' && d.online !== 0) return false;
     if (onFilter === 'unk' && (d.online === 1 || d.online === 0)) return false;
+    if (!matchBackupFilter(d, bkFilter)) return false;
     if (!kw) return true;
     return [d.name, d.host, d.site, d.note, vendorOf(d)]
       .some((x) => (x || '').toLowerCase().includes(kw));
@@ -478,11 +513,23 @@ function renderDevices(filter = '') {
       const siteCell = d.site_id
         ? `<span class="pill ok">${esc(d.site)}</span>`
         : '<span class="pill">未归属</span>';
-      const backupCell = d.last_backup_at
-        ? `<div style="max-width:150px" title="${esc(d.last_message || '')}">
-             <div>${fmtTime(d.last_backup_at).slice(5)}</div>
-             <div>${statusPill(d)}</div></div>`
-        : '<span class="pill">未备份</span>';
+      const sum = d.summary || {};
+      const backupCell = (() => {
+        if (!d.last_backup_at) {
+          return sum.failed
+            ? '<span class="pill">未成功备份</span>'
+            : '<span class="pill">未备份</span>';
+        }
+        const failed = sum.failed || 0;
+        const badge = failed
+          ? `<span class="pill err" title="${failed} 次失败">${failed} 次失败</span>`
+          : '';
+        return `<div style="max-width:170px" title="${esc(d.last_message || '')}">
+             <div class="mono">${fmtTime(d.last_backup_at).slice(5)}</div>
+             <div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:2px">
+               ${statusPill(d)}${badge}
+             </div></div>`;
+      })();
       return `<tr data-id="${d.id}">
         <td>${onlineDot(d)}</td>
         <td><div class="dev-name">${esc(d.name)}</div><div class="dev-host">${esc(d.host)}</div></td>
@@ -940,6 +987,7 @@ $('#btn-download-all').addEventListener('click', () => downloadPackage({ scope: 
 $('#btn-download-all-top').addEventListener('click', () => downloadPackage({ scope: 'all' }, '正在打包全部门店…'));
 $('#device-site-filter').addEventListener('change', (e) => renderDevices($('#device-search').value));
 $('#device-online-filter').addEventListener('change', (e) => renderDevices($('#device-search').value));
+$('#device-backup-filter').addEventListener('change', () => renderDevices($('#device-search').value));
 
 async function refreshAll() {
   await Promise.all([loadSites(), loadDevices()]);

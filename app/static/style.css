@@ -195,6 +195,12 @@ pre.diff .c{color:var(--text-mute);display:block}
   color:var(--brand);font-size:13px;border:1px solid #d8e4fd;
 }
 .toolbar-hint{color:var(--text-mute);font-size:12.5px}
+.stat-clickable{cursor:pointer;transition:.15s;position:relative}
+.stat-clickable:hover{border-color:var(--err);box-shadow:0 2px 10px rgba(220,38,38,.10)}
+.stat-clickable:hover .label{color:var(--err)}
+.stat-hint{
+  font-size:11px;color:var(--err);margin-top:3px;opacity:.8;
+}
 select[multiple]{height:auto;padding:6px}
 select[multiple] option{padding:5px 8px;border-radius:4px}
 

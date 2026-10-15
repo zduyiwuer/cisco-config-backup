@@ -1031,18 +1031,32 @@ def device_backup_summary(device_id: int) -> dict[str, Any]:
         "SELECT COUNT(*) AS c FROM backups WHERE device_id = ? AND status='success'",
         (device_id,),
     ).fetchone()["c"]
+    failed = conn.execute(
+        "SELECT COUNT(*) AS c FROM backups WHERE device_id = ? AND status='failed'",
+        (device_id,),
+    ).fetchone()["c"]
     changed = conn.execute(
-        "SELECT COUNT(*) AS c FROM backups WHERE device_id = ? AND changed=1", (device_id,)
+        "SELECT COUNT(*) AS c FROM backups WHERE device_id = ? "
+        "AND status='success' AND changed=1",
+        (device_id,),
     ).fetchone()["c"]
     latest = conn.execute(
         "SELECT id FROM backups WHERE device_id = ? AND status='success' ORDER BY id DESC LIMIT 1",
         (device_id,),
     ).fetchone()
+    # 最近一次失败时间，供「最近备份失败」筛选与列表展示
+    last_failed = conn.execute(
+        "SELECT started_at FROM backups WHERE device_id = ? AND status='failed' "
+        "ORDER BY id DESC LIMIT 1",
+        (device_id,),
+    ).fetchone()
     return {
         "total": total,
         "success": ok,
+        "failed": failed,
         "changed": changed,
         "latest_backup_id": latest["id"] if latest else None,
+        "last_failed_at": last_failed["started_at"] if last_failed else None,
     }
 
 
