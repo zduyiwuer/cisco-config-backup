@@ -198,6 +198,13 @@ pre.diff .c{color:var(--text-mute);display:block}
 select[multiple]{height:auto;padding:6px}
 select[multiple] option{padding:5px 8px;border-radius:4px}
 
+/* 厂商标签 */
+.vendor-pill{font-weight:500}
+.pill.cisco{background:#e8f4fd;color:#0a6cbd}
+.pill.h3c{background:#eaf4ff;color:#0055a5}
+.pill.huawei{background:#fdeceb;color:#c0392b}
+.pill.ruijie{background:#f0f9ec;color:#4a8c1f}
+
 /* 在线状态 */
 .dot{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;white-space:nowrap}
 .dot i{width:9px;height:9px;border-radius:50%;display:inline-block;flex:0 0 auto}

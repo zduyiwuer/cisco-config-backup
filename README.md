@@ -1,15 +1,34 @@
 # Cisco 配置备份中心
 
-通过 **SSH / Telnet** 登录 Cisco 交换机，自动采集 `show running-config`、`show cdp neighbors detail` 等命令输出，存入本地 SQLite，保留历史版本并高亮展示配置差异。支持按门店归类，备份文件可打包下载到本地。带 Web 管理界面和定时备份。
+通过 **SSH / Telnet** 登录网络设备，自动采集配置与邻居信息，存入本地 SQLite，保留历史版本并高亮展示差异。支持 **Cisco / H3C / 华为 / 锐捷** 多厂商、门店归类、在线探测、登录认证，备份文件可打包下载到本地。
+
+## 支持的设备厂商
+
+| 厂商 | 设备类型 | 配置命令 | 邻居命令 | Enable |
+|---|---|---|---|---|
+| **Cisco IOS** | `cisco` | `show running-config` | `show cdp neighbors detail` | 需要 |
+| **H3C Comware** | `h3c` | `display current-configuration` | `display lldp neighbor-information` | 不需要 |
+| **华为 VRP** | `huawei` | `display current-configuration` | `display lldp neighbor brief` | 不需要 |
+| **锐捷 RGOS** | `ruijie` | `show running-config` | `show lldp neighbors` | 不需要 |
+
+各厂商的差异已全部适配：
+
+- **命令集**：新增设备时按厂商自动套用，也可在设备里自定义
+- **提示符**：Cisco 用 `SW>` / `SW#`，华为与 H3C 用 `<Sysname>` / `[Sysname-GigabitEthernet0/0/1]`
+- **分页关闭**：Cisco `terminal length 0`，H3C `screen-length disable`，华为 `screen-length 0 temporary`
+- **邻居解析**：四家输出格式完全不同，各自独立解析
+- **版本提取**：各厂商的版本号位置与格式不同
+- **特权提权**：只有 Cisco 需要 `enable`，华为/H3C 登录后即特权视图
 
 ## 功能
 
 | 能力 | 说明 |
 |---|---|
+| **多厂商支持** | Cisco / H3C / 华为 / 锐捷，命令集、提示符、邻居解析全自动适配 |
 | **登录认证** | 本地账号 + AD 域账号双入口，全局强制登录 |
 | **角色权限** | 管理员/操作员/只读三级，按接口校验 |
-| 双协议采集 | SSH（paramiko）与 Telnet（自研IAC 协商客户端），自动进入 enable 模式 |
-| 自定义命令 | 每台设备可配置任意命令列表，默认 `show run` + `show cdp ne de` |
+| 双协议采集 | SSH（paramiko）与 Telnet（自研 IAC 协商客户端），自动进入特权视图 |
+| 自定义命令 | 每台设备可配置任意命令列表，默认为厂商适配命令 |
 | 差异版本 | 内容无变化不产生新版本；发生变化时自动生成 unified diff |
 | **批量导入** | CSV / Excel 批量导入设备，逐行校验并给出失败原因 |
 | **在线探测** | 每 5 分钟自动探测设备在线状态，记录延迟与失败原因 |
@@ -17,7 +36,7 @@
 | **打包下载** | 按全部门店/单门店/单设备打包 zip，含 manifest.csv 清单与 .diff 差异 |
 | 定时备份 | 每台设备独立 crontab 表达式，APScheduler 调度，支持并发 |
 | 凭据加密 | 密码 PBKDF2 派生；设备与 AD 密码 Fernet 加密落盘 |
-| CDP 邻居 | 解析 `show cdp neighbors detail`，前端展示邻居卡片 |
+| 邻居拓扑 | 自动识别 CDP/LLDP，解析四家厂商的邻居输出并展示 |
 | 版本清理 | 按设备保留最近 N 个变化版本 |
 
 ## 快速开始
@@ -289,14 +308,19 @@ python run.py --reload           # 开发模式，改代码自动重载
 
 在界面点「新增设备」，填写：
 
+- **设备厂商**：Cisco / H3C / 华为 / 锐捷。选了厂商后，端口与采集命令会自动套用该厂商的默认值
 - **协议**：SSH（默认端口 22）或 Telnet（默认端口 23）
 - **用户名 / 登录密码**：必填，密码加密存储
-- **Enable 密码**：设备要求 enable 时填写
+- **Enable 密码**：**仅 Cisco 需要**，华为与 H3C 登录后即特权视图，留空即可
 - **所属门店**：可选，选定后可在门店页统一管理
-- **采集命令**：每行一条，默认两条
+- **采集命令**：默认按厂商填充，可自行修改（每行一条）
 - **定时备份**：勾选后填 crontab，如 `0 2 * * *`（每天 02:00）、`30 3 * * 1`（每周一 03:30）
 
 保存后先用「测试」按钮验证连通性，再点「备份」。
+
+> 改设备厂商时，若采集命令还是旧厂商的默认值，会自动同步为新厂商的命令集；自定义过的命令保持不变。
+
+批量导入多厂商设备：点「导入」下载 Excel 模板，模板里有四种厂商的示例行。厂商列支持中文（思科 / 华为 / 新华三 / 锐捷）和英文（`cisco` / `huawei` / `h3c` / `ruijie`），留空默认 cisco。
 
 ## 目录结构
 
@@ -304,6 +328,7 @@ python run.py --reload           # 开发模式，改代码自动重载
 cisco-backup/
 ├── app/
 │   ├── main.py                FastAPI 路由 + 鉴权中间件
+│   ├── vendors.py             厂商命令集与提示符适配
 │   ├── auth.py                用户、会话、密码哈希、登录审计
 │   ├── ad.py                  Active Directory / LDAP 认证
 │   ├── collector.py           备份编排：登录→执行→清洗→入库→diff
@@ -314,6 +339,7 @@ cisco-backup/
 │   ├── crypto.py              敏感数据加密
 │   ├── diffing.py             差异计算
 │   ├── cdp.py                 CDP 邻居解析
+│   ├── neighbors.py           多厂商邻居解析（CDP / LLDP）
 │   ├── scheduler.py           定时调度（备份 + 探测）
 │   ├── drivers/
 │   │   ├── base.py            公共接口 + 输出清洗
@@ -338,6 +364,8 @@ cisco-backup/
 │   ├── test_import_probe.py   导入与探测测试（70 项）
 │   ├── test_xlsx_template.py  Excel 模板测试（45 项）
 │   ├── test_auth.py           登录与权限测试（110 项）
+│   ├── test_neighbors.py      多厂商邻居解析测试（52 项）
+│   ├── test_vendors.py        多厂商端到端测试（61 项）
 │   ├── js_smoke.js            前端脚本冒烟测试
 │   └── seed_demo.py           生成演示数据
 ├── data/                      数据库与密钥（运行时生成）
@@ -356,6 +384,8 @@ cisco-backup/
 ./.venv/Scripts/python -m tests.test_import_probe   # 70 项：CSV/Excel 导入 + 在线探测
 ./.venv/Scripts/python -m tests.test_xlsx_template  # 45 项：Excel 模板生成与回导
 ./.venv/Scripts/python -m tests.test_auth           # 110 项：登录/会话/权限/AD
+./.venv/Scripts/python -m tests.test_neighbors      # 52 项：四家厂商邻居输出解析
+./.venv/Scripts/python -m tests.test_vendors        # 61 项：多厂商备份端到端（SSH+Telnet）
 
 # 前端脚本冒烟测试（用 Node 跑，无需浏览器）
 node tests/js_smoke.js
@@ -373,6 +403,7 @@ node tests/js_smoke.js
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
+| GET | `/api/vendors` | 厂商清单与各自默认命令 |
 | GET | `/login` | 登录页 |
 | POST | `/api/auth/login` | 登录（`mode=local` / `ad`） |
 | POST | `/api/auth/logout` | 退出登录 |
@@ -471,6 +502,12 @@ curl -X POST http://127.0.0.1:8077/api/export/package \
 **AD 组名匹配**：先按完整 DN 比对，再退化到只比 CN。配置写 `CN=NetOps,DC=corp,DC=local` 时只认这个 DN，`CN=Users,...` 不会被误判为管理员。多个候选用换行或分号分隔（不能用逗号，会拆坏DN 内部结构）。LDAP 过滤器特殊字符按 RFC 4515 转义。
 
 **测试与认证的关系**：认证上线后所有 API 都需要登录态。`test_auth.py` 专注认证本身并关闭全局拦截，其余测试文件（`test_e2e` 等）显式设置 `auth_enabled=False` 专注业务逻辑，避免相互干扰。
+
+**多厂商适配的边界**：命令集、提示符、分页命令集中在 `app/vendors.py` 一处登记；邻居输出格式差异大，各厂商一个独立解析函数放在 `app/neighbors.py`，通过 `PARSERS` 字典分发。新增厂商通常只需在这两处加配置，不必改驱动代码。
+
+**厂商切换时的命令同步**：改设备厂商时，只有当采集命令仍等于旧厂商默认集（或为空）才自动替换为新厂商默认集，避免覆盖用户自定义命令。
+
+**PATCH 模型的坑**：Pydantic v2 里给字段设了默认值后，`model_dump(exclude_unset=True)` 行为会异常——字段被判定为「已设置」但值是默认值。`DevicePatch.device_type` 因此写成 `str | None = None` 而非带默认值，否则改厂商会静默失效。
 
 ## 注意事项
 

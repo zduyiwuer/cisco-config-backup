@@ -14,7 +14,7 @@ import csv
 import io
 from typing import Any
 
-from . import db
+from . import db, vendors
 
 def _norm(text: Any) -> str:
     """规范化列名：转小写并去掉空格/下划线/连字符，使 ip_address 与 IP ADDRESS 等价。"""
@@ -33,6 +33,9 @@ COLUMN_ALIASES: dict[str, str] = {
     # 协议与端口
     "协议": "protocol", "protocol": "protocol", "连接方式": "protocol",
     "端口": "port", "port": "port", "端口号": "port",
+    # 厂商
+    "厂商": "device_type", "设备厂商": "device_type", "品牌": "device_type",
+    "devicetype": "device_type", "vendor": "device_type", "型号类型": "device_type",
     # 凭据
     "用户名": "username", "username": "username", "user": "username",
     "登录密码": "password", "密码": "password", "password": "password",
@@ -50,20 +53,29 @@ COLUMN_ALIASES: dict[str, str] = {
 }
 
 TEMPLATE_HEADERS = [
-    "设备名称", "管理IP", "协议", "端口", "用户名", "登录密码",
+    "设备名称", "管理IP", "厂商", "协议", "端口", "用户名", "登录密码",
     "Enable密码", "门店", "定时备份", "Cron", "采集命令", "备注",
 ]
 
-# 模板中的示例行（两行，覆盖 ssh 与 telnet、定时与非定时）
+# 模板中的示例行，覆盖四种厂商
 TEMPLATE_ROWS = [
     [
-        "core-sw-01", "10.0.0.1", "ssh", "22", "cisco", "cisco123",
+        "core-sw-01", "10.0.0.1", "cisco", "ssh", "22", "cisco", "cisco123",
         "enable123", "上海南京西路店", "是", "0 2 * * *",
-        "show running-config;show cdp neighbors detail", "核心交换机",
+        "show running-config;show cdp neighbors detail", "思科核心交换机",
     ],
     [
-        "access-sw-02", "10.0.0.2", "telnet", "23", "cisco", "cisco123",
-        "", "上海南京西路店", "否", "", "show running-config", "接入层",
+        "h3c-sw-02", "10.0.0.2", "h3c", "ssh", "22", "admin", "h3c123",
+        "", "上海南京西路店", "否", "", "", "新华三接入交换机",
+    ],
+    [
+        "huawei-sw-03", "10.0.0.3", "huawei", "ssh", "22", "admin", "hw123",
+        "", "深圳南山科技园店", "是", "0 3 * * *",
+        "display current-configuration;display lldp neighbor brief", "华为接入交换机",
+    ],
+    [
+        "access-sw-04", "10.0.0.4", "cisco", "telnet", "23", "cisco", "cisco123",
+        "", "深圳南山科技园店", "否", "", "show running-config", "老设备走 telnet",
     ],
 ]
 
@@ -167,19 +179,21 @@ def template_xlsx() -> bytes:
         ws.append(row)
 
     # 列宽与列批注
-    widths = [16, 14, 8, 7, 12, 14, 14, 20, 10, 14, 40, 18]
+    widths = [16, 14, 12, 8, 7, 12, 14, 14, 20, 10, 14, 40, 18]
     hints = [
         "必填。设备唯一名称，如 core-sw-01",
         "必填。管理 IP 或主机名",
+        "厂商：cisco / h3c / huawei / ruijie，留空默认 cisco。\n"
+        "决定采集命令、提示符识别与邻居解析方式",
         "ssh 或 telnet，留空默认 ssh",
         "留空按协议自动补：ssh=22，telnet=23",
         "登录用户名",
         "新增时必填。留空（更新模式）则保持原密码",
-        "设备要求 enable 时填写",
+        "仅 Cisco 需要（enable 提权），华为/H3C 留空",
         "留空则为未归属；填写的门店不存在会自动创建",
         "是/否、1/0、true/false",
         "5段式 cron，如 0 2 * * * 表示每天 02:00",
-        "多条命令用分号分隔，如 show running-config;show cdp neighbors detail",
+        "多条命令用分号分隔；留空则按厂商自动套用默认命令",
         "任意备注",
     ]
     for idx, (width, hint) in enumerate(zip(widths, hints), start=1):
@@ -193,13 +207,22 @@ def template_xlsx() -> bytes:
         ["设备导入模板使用说明", ""],
         ["", ""],
         ["1", "第一张表「设备清单」填写数据，第一行为表头，请勿修改表头文字。"],
-        ["2", "带 * 的为必填项：设备名称、管理 IP、登录密码（新增时）。"],
+        ["2", "必填项：设备名称、管理 IP、登录密码（新增时）。"],
         ["3", "门店列填写门店名称，不存在会自动创建，无需事先在系统里建门店。"],
         ["4", "端口留空时按协议自动补全：ssh=22，telnet=23。"],
         ["5", "定时备份填「是」，并填写 Cron 表达式，即可导入后自动生效。"],
-        ["6", "采集命令多条用分号分隔；留空则使用系统默认命令。"],
+        ["6", "采集命令多条用分号分隔；留空则按厂商自动套用默认命令。"],
         ["7", "导入方式：仅新增（重名跳过）或按名称更新（密码留空保持原值）。"],
         ["8", "导入时逐行校验，出错的行会单独列出原因，不影响其他行。"],
+        ["", ""],
+        ["厂商支持", "厂商列决定采集命令、提示符识别与邻居解析方式，留空默认为 cisco。"],
+        ["", "cisco   → show running-config / show cdp neighbors detail"],
+        ["", "h3c        → display current-configuration / display lldp neighbor-information"],
+        ["", "huawei     → display current-configuration / display lldp neighbor brief"],
+        ["", "ruijie     → show running-config / show lldp neighbors"],
+        ["", "支持中文：思科、新华三/H3C、华为、锐捷"],
+        ["", ""],
+        ["Enable 密码", "仅 Cisco 需要（用于 enable 提权），华为与 H3C 登录后即特权视图，留空即可。"],
         ["", ""],
         ["列名兼容", "中文与英文表头均可识别，例如 管理IP / ip / ip_address / host 都能识别。"],
     ]
@@ -218,6 +241,34 @@ def template_xlsx() -> bytes:
     buffer = io.BytesIO()
     wb.save(buffer)
     return buffer.getvalue()
+
+
+def _resolve_vendor(raw: str) -> str:
+    """把填写的厂商标识归一为内部 vendor id。
+
+    支持英文（cisco / h3c / huawei / ruijie）与中文
+    （思科 / 华为 / 新华三 / H3C / 锐捷），识别不了则回退 cisco。
+    """
+    from . import vendors
+
+    text = (raw or "").strip().lower()
+    if not text:
+        return "cisco"
+    # 中文与常见别名映射
+    cn_map = {
+        "思科": "cisco", "cisco": "cisco", "ios": "cisco", "cisco ios": "cisco",
+        "华为": "huawei", "huawei": "huawei", "vrp": "huawei",
+        "新华三": "h3c", "h3c": "h3c", "华三": "h3c", "comware": "h3c",
+        "锐捷": "ruijie", "ruijie": "ruijie", "rgos": "ruijie",
+    }
+    key = text.replace(" ", "_")
+    if key in cn_map:
+        return cn_map[key]
+    if key in vendors.VENDORS:
+        return key
+    # 走 vendors 自己的别名表（如 h3c_comware、huawei_vrp）
+    resolved = vendors.normalize_vendor(key)
+    return resolved
 
 
 def import_devices(
@@ -257,9 +308,13 @@ def import_devices(
             results.append({"row": index, "status": "failed", "name": name, "message": f"协议只能是 ssh 或 telnet，当前为 {protocol}"})
             continue
 
+        # 厂商：支持中文与英文标识，未知则回退 cisco
+        vendor_raw = str(item.get("device_type") or "").strip()
+        vendor = _resolve_vendor(vendor_raw)
+
         port_raw = item.get("port")
         if port_raw in (None, ""):
-            port = 22 if protocol == "ssh" else 23
+            port = vendors.default_port_for(vendor)
         else:
             try:
                 port = int(port_raw)
@@ -276,6 +331,7 @@ def import_devices(
             "host": host,
             "protocol": protocol,
             "port": port,
+            "device_type": vendor,
             "username": str(item.get("username") or "").strip(),
             "password": str(item.get("password") or ""),
             "enable_password": str(item.get("enable_password") or ""),
@@ -283,8 +339,8 @@ def import_devices(
             "note": str(item.get("note") or ""),
         }
         commands = _split_commands(item.get("commands"))
-        if commands:
-            payload["commands"] = commands
+        # 未填命令时按厂商套用默认命令集（关键：不同厂商命令不同）
+        payload["commands"] = commands or vendors.default_commands_for(vendor)
         payload["schedule_enabled"] = _to_bool(item.get("schedule_enabled"))
         if payload["schedule_enabled"]:
             payload["cron"] = str(item.get("cron") or "0 2 * * *").strip() or "0 2 * * *"

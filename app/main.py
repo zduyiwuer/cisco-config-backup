@@ -20,8 +20,7 @@ from fastapi.responses import (
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import ad, auth, collector, db, exporter, importer, probe, scheduler
-from .cdp import parse_cdp_neighbors
+from . import ad, auth, collector, db, exporter, importer, probe, scheduler, vendors
 from .drivers.base import DEFAULT_COMMANDS, DeviceError
 
 logging.basicConfig(
@@ -141,6 +140,9 @@ class DevicePatch(BaseModel):
     cron: str | None = None
     site: str | None = None
     site_id: int | None = None
+    # 注意：不要给 device_type 设默认值。带默认值时 PATCH 的 exclude_unset
+    # 判定会异常，导致改厂商不生效。
+    device_type: str | None = None
     note: str | None = None
 
 
@@ -656,6 +658,25 @@ def api_probe_history(device_id: int, limit: int = 50) -> dict[str, Any]:
     return {"device_id": device_id, "history": db.probe_history(device_id, min(limit, 200))}
 
 
+# --------------------------------------------------------------------- vendors
+@app.get("/api/vendors")
+def api_list_vendors() -> list[dict[str, Any]]:
+    """支持的设备厂商与各自的默认采集命令，供前端下拉选择。"""
+    return [
+        {
+            "id": vid,
+            "label": cfg["label"],
+            "default_port": cfg["default_port"],
+            "protocols": list(cfg["protocols"]),
+            "default_commands": list(cfg["default_commands"]),
+            "paging_commands": list(cfg["paging_commands"]),
+            "needs_enable": cfg["needs_enable"],
+            "neighbor_command": cfg["neighbor_command"],
+        }
+        for vid, cfg in vendors.VENDORS.items()
+    ]
+
+
 # --------------------------------------------------------------------- devices
 @app.get("/api/devices")
 def api_list_devices(
@@ -671,7 +692,16 @@ def api_list_devices(
 @app.post("/api/devices", status_code=201)
 def api_create_device(payload: DeviceIn, request: Request) -> dict[str, Any]:
     require_role(request, "operator")
-    data = payload.model_dump()
+    data = payload.model_dump(exclude_unset=True)
+    # 厂商归一：兼容旧的 cisco_ios 之类写法
+    vendor = vendors.normalize_vendor(data.get("device_type") or "cisco_ios")
+    data["device_type"] = vendor
+    # 未显式给端口时按厂商默认值
+    if not data.get("port"):
+        data["port"] = vendors.default_port_for(vendor)
+    # 未显式给命令时套用厂商默认命令集
+    if not data.get("commands"):
+        data["commands"] = vendors.default_commands_for(vendor)
     try:
         device = db.create_device(data)
     except Exception as exc:  # 名称唯一约束等

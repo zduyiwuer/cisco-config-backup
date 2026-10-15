@@ -51,9 +51,10 @@ def main() -> int:
     check("包含设备清单工作表", "设备清单" in wb.sheetnames, str(wb.sheetnames))
     check("包含填写说明工作表", "填写说明" in wb.sheetnames)
     ws = wb["设备清单"]
-    check("表头 12 列", ws.max_column == 12, str(ws.max_column))
+    check("表头 13 列（含厂商）", ws.max_column == 13, str(ws.max_column))
     check("表头文案正确", ws.cell(row=1, column=1).value == "设备名称")
-    check("含两行示例", ws.max_row == 3, str(ws.max_row))
+    check("含厂商列", ws.cell(row=1, column=3).value == "厂商")
+    check("含 4 行示例（四厂商）", ws.max_row == 5, str(ws.max_row))
     check("冻结表头", ws.freeze_panes == "A2", str(ws.freeze_panes))
     check("启用筛选", ws.auto_filter.ref is not None)
     check("表头有样式", ws.cell(row=1, column=1).fill.fgColor.rgb not in (None, "00000000"))
@@ -66,36 +67,62 @@ def main() -> int:
 
     print("\n=== 2. Excel 模板可直接回导 ===")
     rows = importer.read_table(xlsx, "template.xlsx")
-    check("读回2 行数据", len(rows) == 2, str(len(rows)))
+    check("读回 4 行数据", len(rows) == 4, str(len(rows)))
     result = importer.import_devices(rows, mode="create")
-    check("回导成功 2 台", result["summary"]["created"] == 2, str(result["summary"]))
+    check("回导成功 4 台", result["summary"]["created"] == 4, str(result["summary"]))
 
     devices = {d["name"]: d for d in db.list_devices()}
-    check("设备名正确", "core-sw-01" in devices and "access-sw-02" in devices)
+    expected = {"core-sw-01", "h3c-sw-02", "huawei-sw-03", "access-sw-04"}
+    check("四厂商设备都在", expected <= set(devices), str(sorted(devices)))
+    check(
+        "厂商字段正确",
+        devices["huawei-sw-03"]["device_type"] == "huawei"
+        and devices["h3c-sw-02"]["device_type"] == "h3c"
+        and devices["core-sw-01"]["device_type"] == "cisco",
+        f'{devices["huawei-sw-03"]["device_type"]}/'
+        f'{devices["h3c-sw-02"]["device_type"]}/'
+        f'{devices["core-sw-01"]["device_type"]}',
+    )
     check("SSH 设备入库", devices["core-sw-01"]["protocol"] == "ssh")
-    check("Telnet 设备入库", devices["access-sw-02"]["protocol"] == "telnet")
+    check(
+        "华为设备命令按厂商套用",
+        "display current-configuration" in devices["huawei-sw-03"]["commands"],
+        str(devices["huawei-sw-03"]["commands"]),
+    )
+    check(
+        "H3C 邻居命令正确",
+        "display lldp neighbor-information" in devices["h3c-sw-02"]["commands"],
+        str(devices["h3c-sw-02"]["commands"]),
+    )
+    check("Telnet 设备入库", devices["access-sw-04"]["protocol"] == "telnet")
     check("密码已加密存储",
           db.get_device_by_name("core-sw-01")["password"] == "cisco123")
     check("Enable 密码保留",
           db.get_device_by_name("core-sw-01")["enable_password"] == "enable123")
+    check("华为设备无 enable 密码",
+          not db.get_device_by_name("huawei-sw-03")["enable_password"])
     check("门店已自动创建", db.get_site_by_name("上海南京西路店") is not None)
+    check("深圳门店已自动创建", db.get_site_by_name("深圳南山科技园店") is not None)
     check("定时备份已导入",
           devices["core-sw-01"]["schedule_enabled"] is True
           and devices["core-sw-01"]["cron"] == "0 2 * * *")
-    check("非定时设备未误开", devices["access-sw-02"]["schedule_enabled"] is False)
+    check("非定时设备未误开", devices["access-sw-04"]["schedule_enabled"] is False)
     check("采集命令按分号拆分",
           devices["core-sw-01"]["commands"] ==
           ["show running-config", "show cdp neighbors detail"],
           str(devices["core-sw-01"]["commands"]))
-    check("备注保留", devices["core-sw-01"]["note"] == "核心交换机")
+    check("备注保留", devices["core-sw-01"]["note"] == "思科核心交换机")
 
     print("\n=== 3. 修改模板后回导（模拟用户填表） ===")
     wb = load_workbook(io.BytesIO(xlsx))
     ws = wb["设备清单"]
-    ws.delete_rows(2, 2)
-    ws.append(["user-sw-01", "192.168.1.1", "ssh", "", "admin", "userpw", "",
-               "广州天河店", "否", "", "", "用户自填"])
-    ws.append(["user-sw-02", "192.168.1.2", "telnet", "2323", "admin", "userpw", "",
+    # 清空全部示例行（模板有 4 行，按行数动态删）
+    if ws.max_row > 1:
+        ws.delete_rows(2, ws.max_row - 1)
+    # 13 列：设备名称/管理IP/厂商/协议/端口/用户名/登录密码/Enable密码/门店/定时备份/Cron/采集命令/备注
+    ws.append(["user-sw-01", "192.168.1.1", "huawei", "ssh", "", "admin", "userpw", "",
+               "广州天河店", "否", "", "", "用户自填华为设备"])
+    ws.append(["user-sw-02", "192.168.1.2", "cisco", "telnet", "2323", "admin", "userpw", "",
                "", "否", "", "show running-config", ""])
     buf = io.BytesIO()
     wb.save(buf)
@@ -107,6 +134,11 @@ def main() -> int:
     check("用户数据导入成功", r2["summary"]["created"] == 2, str(r2["summary"]))
     check("无失败行", r2["summary"]["failed"] == 0)
     d2 = {d["name"]: d for d in db.list_devices()}
+    check("用户填写的厂商被识别", d2["user-sw-01"]["device_type"] == "huawei",
+          d2["user-sw-01"]["device_type"])
+    check("华为设备自动套用默认命令",
+          "display current-configuration" in d2["user-sw-01"]["commands"],
+          str(d2["user-sw-01"]["commands"]))
     check("用户端口为空时自动补全", d2["user-sw-01"]["port"] == 22,
           str(d2["user-sw-01"]["port"]))
     check("用户填写的端口被保留", d2["user-sw-02"]["port"] == 2323,
@@ -117,7 +149,7 @@ def main() -> int:
     csv_tpl = importer.template_csv()
     check("CSV 模板含表头", "设备名称" in csv_tpl)
     csv_rows = importer.read_table(csv_tpl.encode("utf-8"), "t.csv")
-    check("CSV 模板可回导", len(csv_rows) == 2, str(len(csv_rows)))
+    check("CSV 模板可回导", len(csv_rows) == 4, str(len(csv_rows)))
 
     print("\n=== 5. HTTP API ===")
     from fastapi.testclient import TestClient

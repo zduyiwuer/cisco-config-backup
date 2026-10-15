@@ -1,16 +1,25 @@
-"""基于 paramiko 的 SSH 采集驱动（Cisco IOS / NX-OS / IOS-XE 通用）。"""
+"""SSH 采集驱动（多厂商通用）。
+
+通过 vendors 模块按设备类型切换提示符正则、分页命令与enable 逻辑，
+支持 Cisco IOS / H3C Comware / 华为 VRP / 锐捷 RGOS。
+"""
 
 from __future__ import annotations
 
 import re
 import time
+from typing import Any
 
 import paramiko
 
+from .. import vendors
 from .base import DeviceError
 
-PROMPT_RE = re.compile(r"[A-Za-z0-9_.\-()]+(?:\([^\)\r\n]+\))?[>#][ \t]*$")
 MORE_RE = re.compile(r"--More--", re.IGNORECASE)
+# 华为/H3C 用不同风格的分页提示
+MORE_RE_ALT = re.compile(
+    r"(?:----\s*More\s*----|Press\s+Q\s+to\s+break|继续|\[Y/N\]|More\s*\()", re.IGNORECASE
+)
 
 
 class SSHClient:
@@ -23,6 +32,7 @@ class SSHClient:
         connect_timeout: int = 15,
         command_timeout: int = 45,
         paging_fix: bool = True,
+        device_type: str = "cisco_ios",
     ) -> None:
         self.host = host
         self.port = port
@@ -31,6 +41,9 @@ class SSHClient:
         self.connect_timeout = connect_timeout
         self.command_timeout = command_timeout
         self.paging_fix = paging_fix
+        self.device_type = device_type
+        self.vendor = vendors.vendor_config(device_type)
+        self.prompt_patterns = vendors.all_prompt_regexes(device_type)
         self.client: paramiko.SSHClient | None = None
         self.shell = None
         self._buffer = ""
@@ -68,26 +81,28 @@ class SSHClient:
 
         try:
             self.prompt = self._wait_for_prompt(self.connect_timeout)
+            if vendors.is_login_prompt(self._buffer):
+                raise DeviceError("仍停留在登录界面，密码可能不正确")
             if self.paging_fix:
-                self.send("terminal length 0")
-                self.prompt = self._wait_for_prompt(self.command_timeout)
-                self.send("terminal width 511")
-                self._wait_for_prompt(self.command_timeout)
+                for cmd in self.vendor["paging_commands"]:
+                    self.send(cmd)
+                    self.prompt = self._wait_for_prompt(self.command_timeout)
         except DeviceError:
             self.close()
             raise
         return self.prompt
 
     def enable(self, enable_password: str = "") -> None:
-        """进入 enable 特权模式（若已处于特权模式则跳过）。"""
-        if self.prompt.endswith("#"):
+        """进入特权模式。仅 Cisco 需要（华为/H3C 登录后即特权视图）。"""
+        if not self.vendor["needs_enable"]:
+            return
+        if self.prompt.rstrip().endswith("#"):
             return
         self.send("enable")
         # 设备可能直接放行（本来就在 enable 模式），也可能索要密码
-        out = self.read_until([r"[Pp]assword\s*:", PROMPT_RE.pattern], timeout=8)
-        m = PROMPT_RE.search(out)
+        out = self.read_until([r"[Pp]assword\s*:", self.prompt_patterns[0].pattern], timeout=8)
+        m = self.prompt_patterns[0].search(out)
         if m:
-            # 设备直接给了特权提示符，无需再送 enable 密码
             self.prompt = m.group(0).strip()
             if self.prompt.endswith("#"):
                 return
@@ -95,7 +110,7 @@ class SSHClient:
             raise DeviceError("设备要求 enable 密码，但未配置 enable password")
         self.send(enable_password)
         self.prompt = self._wait_for_prompt(self.command_timeout)
-        if not self.prompt.endswith("#"):
+        if not self.prompt.rstrip().endswith("#"):
             raise DeviceError(f"进入 enable 特权模式失败，当前提示符: {self.prompt!r}")
 
     # ------------------------------------------------------------------- io
@@ -103,6 +118,32 @@ class SSHClient:
         if self.shell is None:
             raise DeviceError("SSH 会话未建立")
         self.shell.send(line + "\n")
+
+    @staticmethod
+    def _strip_ansi(text: str) -> str:
+        return re.sub(r"\x1b\[[0-9;?]*[a-zA-Z]", "", text).replace("\x1b[?25l", "").replace(
+            "\x1b[?25h", ""
+        )
+
+    def _has_more(self, text: str) -> bool:
+        return bool(MORE_RE.search(text) or MORE_RE_ALT.search(text))
+
+    def _drain_paging(self, text: str) -> str:
+        """处理分页提示，直到不再出现。"""
+        guard = 0
+        while self._has_more(text) and guard < 2000:
+            guard += 1
+            text = MORE_RE.sub("", text)
+            text = MORE_RE_ALT.sub("", text)
+            if self.shell is None:
+                break
+            try:
+                self.shell.send(" ")
+                time.sleep(0.05)
+                text += self.shell.recv(65535).decode("utf-8", errors="replace")
+            except Exception:
+                break
+        return text
 
     def _pump(self, deadline: float) -> None:
         assert self.shell is not None
@@ -116,16 +157,7 @@ class SSHClient:
             if not data:
                 raise DeviceError("设备主动断开了连接")
             text = data.decode("utf-8", errors="replace")
-            # 终端宽度不足时设备会插入 --More-- 分页，发送空格翻页
-            while MORE_RE.search(text):
-                self.shell.send(" ")
-                time.sleep(0.15)
-                try:
-                    text += self.shell.recv(65535).decode("utf-8", errors="replace")
-                except TimeoutError:
-                    break
-                except Exception:
-                    break
+            text = self._drain_paging(text)
             self._buffer += text
 
     def read_until(self, patterns: list[str], timeout: float) -> str:
@@ -141,11 +173,19 @@ class SSHClient:
                 return out
             self._pump(min(deadline, time.time() + 1.0))
 
+    def _find_prompt(self, text: str) -> re.Match[str] | None:
+        """在文本末尾匹配提示符。逐个厂商正则尝试。"""
+        cleaned = self._strip_ansi(text)
+        for pattern in self.prompt_patterns:
+            m = pattern.search(cleaned)
+            if m:
+                return m
+        return None
+
     def _wait_for_prompt(self, timeout: float) -> str:
-        """等待提示符出现，返回识别到的提示符（超时则返回最后一行）。"""
         deadline = time.time() + timeout
         while True:
-            match = PROMPT_RE.search(self._strip_ansi(self._buffer))
+            match = self._find_prompt(self._buffer)
             if match:
                 self._buffer = ""
                 return match.group(0).strip()
@@ -155,26 +195,20 @@ class SSHClient:
                 return cleaned.splitlines()[-1] if cleaned else ">"
             self._pump(min(deadline, time.time() + 1.0))
 
-    @staticmethod
-    def _strip_ansi(text: str) -> str:
-        return re.sub(r"\x1b\[[0-9;?]*[a-zA-Z]", "", text).replace(
-            "\x1b[?25l", ""
-        ).replace("\x1b[?25h", "")
-
     def run(self, command: str) -> str:
         """发送命令并返回该命令的输出（不含命令回显与提示符）。"""
         self._buffer = ""  # 丢弃发送前的残留，确保输出归属于本条命令
         self.send(command)
         deadline = time.time() + self.command_timeout
         while True:
-            match = PROMPT_RE.search(self._strip_ansi(self._buffer))
+            match = self._find_prompt(self._buffer)
             if match:
                 raw = self._buffer[: match.start()]
                 self._buffer = ""
-                return raw
+                return self._drain_paging(raw)
             if time.time() >= deadline:
                 raw, self._buffer = self._buffer, ""
-                return raw
+                return self._drain_paging(raw)
             self._pump(min(deadline, time.time() + 1.0))
 
     def close(self) -> None:

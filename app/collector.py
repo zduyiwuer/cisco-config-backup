@@ -7,8 +7,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
-from . import db
-from .cdp import parse_cdp_neighbors
+from . import db, neighbors, vendors
 from .drivers.base import (
     DeviceError,
     clean_output,
@@ -37,6 +36,7 @@ def _build_client(device: dict[str, Any], settings: dict[str, Any]):
         connect_timeout=int(settings.get("connect_timeout", 15)),
         command_timeout=int(settings.get("command_timeout", 45)),
         paging_fix=bool(settings.get("paging_fix", True)),
+        device_type=device.get("device_type", "cisco_ios"),
     )
     if device["protocol"] == "telnet":
         return TelnetClient(**kwargs)
@@ -49,7 +49,11 @@ def backup_device(device_id: int, trigger: str = "manual") -> dict[str, Any]:
     if not device:
         raise DeviceError(f"设备 id={device_id} 不存在")
     settings = db.get_settings()
-    commands = device.get("commands") or settings["default_commands"]
+    vendor = vendors.normalize_vendor(device.get("device_type"))
+    # 命令优先级：设备自定义 > 厂商默认 > 全局默认
+    commands = device.get("commands") or vendors.default_commands_for(vendor)
+    if not commands:
+        commands = settings["default_commands"]
 
     RUNNING[device_id] = {
         "device_id": device_id,
@@ -70,6 +74,12 @@ def backup_device(device_id: int, trigger: str = "manual") -> dict[str, Any]:
         RUNNING[device_id]["prompt"] = client.prompt
 
         os_version = None
+        # 优先跑厂商的 version 命令拿准确版本号；命令列表里已有它就复用，
+        # 没有则额外跑一次（该输出不计入备份文件，仅用于展示版本）
+        version_cmd = vendors.vendor_config(device["device_type"])["version_command"]
+        version_output = ""
+        config_output = ""
+
         for command in commands:
             raw = client.run(command)
             content = clean_output(raw, command, client.prompt)
@@ -81,8 +91,27 @@ def backup_device(device_id: int, trigger: str = "manual") -> dict[str, Any]:
             if file_meta["is_new"] and diff_meta:
                 changed = True
             log.info("[%s] %s %s", device["name"], command, "CHANGED" if changed else "OK")
-            if os_version is None:
-                os_version = parse_os_version(content)
+
+            low = command.strip().lower()
+            if low == version_cmd:
+                version_output = content
+            if "current-configuration" in low or "running-config" in low:
+                config_output = content
+
+        # 版本号：version 命令输出最准确；没有则从配置文件里兜底提取
+        if not version_output and version_cmd not in [
+            c.strip().lower() for c in commands
+        ]:
+            try:
+                version_output = clean_output(
+                    client.run(version_cmd), version_cmd, client.prompt
+                )
+            except DeviceError:
+                log.debug("[%s] 获取版本号失败，忽略", device["name"])
+        os_version = (
+            parse_os_version(version_output, vendor)
+            or parse_os_version(config_output, vendor)
+        )
 
         duration = int((time.time() - started) * 1000)
         db.finish_backup(backup_id, "success", changed=changed, duration_ms=duration, os_version=os_version)
@@ -169,8 +198,24 @@ def test_connection(device_id: int) -> dict[str, Any]:
 
 
 def neighbors_of(device_id: int) -> list[dict[str, Any]]:
-    """取该设备最近一次成功备份中的 CDP 邻居。"""
-    row = db.latest_config(device_id, "show cdp neighbors detail")
-    if not row:
+    """取该设备最近一次成功备份中的邻居信息（按厂商解析）。"""
+    device = db.get_device(device_id)
+    if not device:
         return []
-    return parse_cdp_neighbors(row["content"])
+    vendor = vendors.normalize_vendor(device.get("device_type"))
+    parser_name = vendors.vendor_config(device["device_type"])["neighbor_parser"]
+    neighbor_cmd = vendors.vendor_config(device["device_type"])["neighbor_command"]
+
+    # 优先按厂商的邻居命令找；找不到再退回历史里的 lldp/cdp 输出
+    candidates = [neighbor_cmd]
+    candidates += [c for c in device.get("commands", []) if c != neighbor_cmd]
+    for cmd in candidates:
+        row = db.latest_config(device_id, cmd)
+        if not row:
+            continue
+        # 命令名与解析器不匹配时（如用户自定义了邻居命令），
+        # 退回 cisco 解析器试一次
+        rows = neighbors.parse_neighbors(row["content"], parser_name)
+        if rows:
+            return rows
+    return []

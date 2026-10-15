@@ -621,7 +621,7 @@ def update_device(device_id: int, payload: dict[str, Any]) -> dict[str, Any] | N
 
     fields: list[str] = []
     values: list[Any] = []
-    simple = ("name", "host", "username", "device_type", "cron", "note")
+    simple = ("name", "host", "username", "cron", "note")
     for key in simple:
         if key in payload:
             fields.append(f"{key} = ?")
@@ -630,6 +630,23 @@ def update_device(device_id: int, payload: dict[str, Any]) -> dict[str, Any] | N
         site_id, site_name = _resolve_site(get_conn(), payload)
         fields.extend(["site_id = ?", "site = ?"])
         values.extend([site_id, site_name])
+    # 厂商变更时：若设备用的还是旧厂商的默认命令集，则同步为新厂商的命令集
+    if "device_type" in payload:
+        from . import vendors
+
+        old_vendor = vendors.normalize_vendor(existing["device_type"])
+        new_vendor = vendors.normalize_vendor(payload["device_type"])
+        if new_vendor != old_vendor:
+            fields.append("device_type = ?")
+            values.append(new_vendor)
+            old_default = vendors.default_commands_for(old_vendor)
+            current_cmds = json.loads(existing["commands"] or "[]")
+            # 只在命令仍等于旧默认（或为空）时才替换，避免覆盖用户自定义
+            if not current_cmds or current_cmds == old_default:
+                fields.append("commands = ?")
+                values.append(
+                    json.dumps(vendors.default_commands_for(new_vendor), ensure_ascii=False)
+                )
     if "port" in payload:
         fields.append("port = ?")
         values.append(int(payload["port"]))

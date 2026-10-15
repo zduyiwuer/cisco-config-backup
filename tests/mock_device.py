@@ -108,9 +108,154 @@ RESPONSES = {
         "1    default                          active    Gi0/3, Gi0/4\n"
         "10   users                            active    Gi0/2\n"
     ),
+    # ---------- H3C Comware ----------
+    "display current-configuration": lambda s: H3C_CONFIG_V1 if s["v"] == 1 else H3C_CONFIG_V2,
+    "display version": lambda s: (
+        "H3C Comware Software, Version 7.1.070, Release 3111P05\n"
+        "Copyright (c) 2004-2021 New H3C Technologies Co., Ltd.\n"
+        "H3C S5560X-54C-EI uptime is 12 weeks"
+    ),
+    "screen-length disable": lambda s: "",
+    "screen-width 511": lambda s: "",
+    # ---------- 华为 VRP ----------
+    "display lldp neighbor brief": lambda s: HUAWEI_LLDP_BRIEF,
+    "display interface brief": lambda s: (
+        "Interface                PHY   Protocol InUti OutUti   inErrors  outErrors\n"
+        "GigabitEthernet0/0/1     up    up         0%    0%           0          0\n"
+    ),
+    "screen-length 0 temporary": lambda s: "",
+    # ---------- 锐捷 RGOS ----------
+    "show lldp neighbors": lambda s: RUIJIE_LLDP,
 }
 
-STATE = {"v": 1}
+HUAWEI_CONFIG = """#
+!Software Version VRP (R) Software, Version 8.180 (CE6865 V200R023C10)
+!Copyright (C) 2012-2026 Huawei Technologies Co., Ltd.
+sysname HUAWEI-CORE-SW
+#
+ vlan batch 10 20
+#
+interface Vlanif10
+ ip address 192.168.10.1 255.255.255.0
+#
+interface GigabitEthernet0/0/1
+ description uplink-to-core
+ port link-type trunk
+ port trunk allow-pass vlan 10 20
+#
+interface GigabitEthernet0/0/2
+ port link-type access
+ port default vlan 10
+ stp edged-port enable
+#
+ lldp enable
+#
+snmp-agent community read cipher %^%#%^%#%
+#
+user-interface vty 0 4
+ authentication-mode aaa
+#
+return"""
+
+# 华为的 display current-configuration 与 H3C 同名，用状态区分厂商：
+# mock 侧按实际测试需要，这里让两端各自服务器复用同一响应即可。
+RESPONSES["display current-configuration"] = (
+    lambda s: H3C_CONFIG_V1 if s["v"] == 1 else H3C_CONFIG_V2
+)
+
+H3C_CONFIG_V1 = """#
+ version 7.1.070, Release 3111P05
+#
+sysname H3C-CORE-SW
+#
+ irb mac-address timer auto
+#
+interface LoopBack0
+ description Router-ID
+ ip address 10.255.0.1 255.255.255.255
+#
+interface GigabitEthernet1/0/1
+ description uplink-to-core
+ port link-mode bridge
+ speed 1000
+#
+interface GigabitEthernet1/0/2
+ port link-mode bridge
+ port access vlan 10
+ stp edged-port enable
+#
+ info-center loghost 10.0.0.100
+#
+line vty 0 63
+ authentication-mode scheme
+#
+return"""
+
+H3C_CONFIG_V2 = H3C_CONFIG_V1.replace(
+    "description uplink-to-core",
+    "description uplink-to-core-printer",
+).replace("stp edged-port enable", "stp edged-port enable\n loopback-detect enable")
+
+H3C_LLDP = """LLDP neighbor-information of port 1[GigabitEthernet1/0/1]
+  Neighbor index :1
+  Device type     :LLDP device
+  System name     :H3C-ACCESS-SW
+  System description :
+    H3C S5560X-54C-EI, Software Version 7.1.070, Release 3111P05
+  Management address :
+    IPv4 address :10.1.1.3
+  Port description :GigabitEthernet1/0/24
+  Interface index :2
+  TTL :120
+  Capability :
+    Supported :Bridge, Router
+    Enabled   :Bridge, Router
+
+  System MAC: 0023-8927-afdc
+LLDP neighbor-information of port 2[GigabitEthernet1/0/2]
+  Neighbor index :1
+  Device type     :LLDP device
+  System name     :H3C-AP-01
+  System description :
+    H3C WA4320, Software Version 7.1.070
+  Management address :
+    IPv4 address :10.1.3.50
+  Port description :GigabitEthernet1
+  Interface index :2
+  TTL :120
+  Capability :
+    Supported :Bridge
+    Enabled   :Bridge
+"""
+
+HUAWEI_LLDP_BRIEF = """Local Intf            Neighbor Dev       Neighbor Intf      Exptime(s)
+-------------------------------------------------------------------------------
+10GE1/0/1             HUAWEI-CORE-02     10GE1/0/24         120
+10GE1/0/2             HUAWEI-ACCESS-01   10GE1/0/25         98
+"""
+
+RUIJIE_LLDP = """Interface          Chassis ID          Port ID                System Name
+GigabitEthernet0/1  4c1f-cc12-3456GigabitEthernet0/24       RG-CORE-02
+GigabitEthernet0/2  4c1f-cc12-7890  GigabitEthernet0/25       RG-ACCESS-01
+"""
+
+# 各厂商登录 banner
+VENDOR_BANNER = {
+    "cisco": b"\r\nCisco IOS Software, C3560 Software\r\nCopyright (c) 1986-2010\r\n",
+    "h3c": b"\r\nH3C Comware Software, Version 7.1.070, Release 3111P05\r\n",
+    "huawei": b"\r\nHuawei Versatile Routing Platform Software\r\nVRP (R) Software, Version 8.180\r\n",
+    "ruijie": b"\r\nRuijie RGOS\r\n",
+}
+
+# 各厂商初始提示符
+VENDOR_PROMPT = {
+    "cisco": "CORE-SW-01>",
+    "h3c": "<H3C-CORE-SW>",
+    "huawei": "<HUAWEI-CORE-SW>",
+    "ruijie": "RG-SW-01>",
+}
+
+STATE = {"v": 1, "vendor": "cisco"}
 
 
 class MockSession(paramiko.ServerInterface):
@@ -139,12 +284,15 @@ class MockSSHServer(threading.Thread):
 
     注意：paramiko 的 Transport 不会自动 accept 监听套接字，
     必须由我们自己 accept 出已连接的 socket 再交给 Transport。
+
+    vendor 参数决定 banner、初始提示符与登录后的行为（华为/H3C 不需 enable）。
     """
 
     daemon = True
 
-    def __init__(self, host: str = "127.0.0.1", port: int = 0) -> None:
+    def __init__(self, host: str = "127.0.0.1", port: int = 0, vendor: str = "cisco") -> None:
         super().__init__(daemon=True)
+        self.vendor = vendor
         self.sock = socket.socket()
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.sock.bind((host, port))
@@ -156,8 +304,9 @@ class MockSSHServer(threading.Thread):
         self.transports: list[paramiko.Transport] = []
 
     def run(self) -> None:
+        STATE["vendor"] = self.vendor
         self.ready.set()
-        log.info("mock SSH 服务端已启动 %s:%s", self.host, self.port)
+        log.info("mock SSH 服务端已启动 %s:%s (vendor=%s)", self.host, self.port, self.vendor)
         while self.running:
             try:
                 conn, addr = self.sock.accept()
@@ -187,15 +336,20 @@ class MockSSHServer(threading.Thread):
                 pass
 
     def _serve(self, chan) -> None:
-        """在已建立的 channel 上跑 CLI 会话（与 Telnet 侧共享命令执行逻辑）。
+        """在已建立的 channel 上跑 CLI 会话。
 
         状态机：cli -> enable 时切到 awaiting_enable_password，收到密码后回到 cli。
+        华为/H3C/锐捷登录后即为特权视图，不需要 enable。
         """
-        enabled = False
+        vendor = self.vendor
+        needs_enable = vendor == "cisco"
+        enabled = not needs_enable  # 非 Cisco 视作已在特权视图
         awaiting_enable_pwd = False
-        prompt = "CORE-SW-01>"
+        prompt = VENDOR_PROMPT.get(vendor, "SW>")
+        # 只有 Cisco 用 # 表示特权视图；华为/H3C 一律是尖括号
+        priv_prompt = prompt.replace(">", "#", 1) if vendor == "cisco" else prompt
         chan.settimeout(60)
-        chan.send(b"\r\nCisco IOS Software, C3560 Software\r\n")
+        chan.send(VENDOR_BANNER.get(vendor, b"\r\n"))
         chan.send(b"\r\nUser Access Verification\r\n\r\n")
         buf = b""
         try:
@@ -216,28 +370,28 @@ class MockSSHServer(threading.Thread):
                         awaiting_enable_pwd = False
                         if line == ENABLE_PASSWORD:
                             enabled = True
-                            prompt = "CORE-SW-01#"
-                            chan.send(f"\r\n{prompt} ".encode())
+                            chan.send(f"\r\n{priv_prompt} ".encode())
                         else:
                             chan.send(b"\r\n% Access denied\r\n")
                             chan.send(f"\r\n{prompt} ".encode())
                         continue
 
                     low = line.lower()
-                    if low == "enable":
+                    if low == "enable" and needs_enable:
                         if not enabled:
                             awaiting_enable_pwd = True
                             chan.send(b"\r\nPassword: ")
                         else:
-                            chan.send(f"\r\n{prompt} ".encode())
+                            chan.send(f"\r\n{priv_prompt} ".encode())
                         continue
 
                     resp = _exec(line, enabled)
+                    cur = priv_prompt if enabled else prompt
                     if resp == "":
-                        chan.send(f"\r\n{prompt} ".encode())
+                        chan.send(f"\r\n{cur} ".encode())
                     else:
                         chan.send(
-                            ("\r\n" + resp.replace("\n", "\r\n") + f"\r\n{prompt} ").encode()
+                            ("\r\n" + resp.replace("\n", "\r\n") + f"\r\n{cur} ").encode()
                         )
         except OSError:
             pass
@@ -263,9 +417,35 @@ class MockSSHServer(threading.Thread):
 def _exec(line: str, enabled: bool) -> str:
     """模拟设备 CLI 的命令执行，返回输出文本（空串表示无输出）。"""
     low = line.lower()
-    if not line or low in ("terminal length 0", "terminal width 511"):
+    vendor = STATE.get("vendor", "cisco")
+    if not line or low in (
+        "terminal length 0", "terminal width 511",
+        "screen-length disable", "screen-width 511", "screen-length 0 temporary",
+    ):
         return ""
-    if low.startswith("show "):
+    # 华为与 H3C 命令相同，按厂商返回各自的配置样例
+    if low == "display current-configuration":
+        if vendor == "huawei":
+            return HUAWEI_CONFIG
+        return H3C_CONFIG_V1 if STATE["v"] == 1 else H3C_CONFIG_V2
+    if low == "display version":
+        if vendor == "huawei":
+            return (
+                "Huawei Versatile Routing Platform Software\n"
+                "VRP (R) Software, Version 8.180 (CE6865 V200R023C10)\n"
+                "Copyright (C) 2012-2026 Huawei Technologies Co., Ltd."
+            )
+        return (
+            "H3C Comware Software, Version 7.1.070, Release 3111P05\n"
+            "Copyright (c) 2004-2021 New H3C Technologies Co., Ltd.\n"
+            "H3C S5560X-54C-EI uptime is 12 weeks"
+        )
+    # H3C 的 LLDP 输出是verbose 分块格式，华为是表格，按厂商区分
+    if low == "display lldp neighbor-information":
+        if vendor == "huawei":
+            return HUAWEI_LLDP_BRIEF
+        return H3C_LLDP
+    if low.startswith("show ") or low.startswith("display "):
         if not enabled:
             return "% Invalid input detected at '^' marker."
         handler = RESPONSES.get(low)
@@ -282,8 +462,9 @@ class MockTelnetServer(threading.Thread):
 
     daemon = True
 
-    def __init__(self, host: str = "127.0.0.1", port: int = 0) -> None:
+    def __init__(self, host: str = "127.0.0.1", port: int = 0, vendor: str = "cisco") -> None:
         super().__init__(daemon=True)
+        self.vendor = vendor
         self.sock = socket.socket()
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.sock.bind((host, port))
@@ -294,8 +475,9 @@ class MockTelnetServer(threading.Thread):
         self.ready = threading.Event()
 
     def run(self) -> None:
+        STATE["vendor"] = self.vendor
         self.ready.set()
-        log.info("mock Telnet 服务端已启动 %s:%s", self.host, self.port)
+        log.info("mock Telnet 服务端已启动 %s:%s (vendor=%s)", self.host, self.port, self.vendor)
         while self.running:
             try:
                 conn, _ = self.sock.accept()
@@ -314,10 +496,12 @@ class MockTelnetServer(threading.Thread):
             return
         buf = ""
         stage = "user"
-        enabled = False
-        prompt = "CORE-SW-TL>"
+        vendor = self.vendor
+        needs_enable = vendor == "cisco"
+        enabled = not needs_enable  # 非 Cisco 视作已在特权视图
+        prompt = VENDOR_PROMPT.get(vendor, "SW>")
         try:
-            conn.sendall(b"\r\nCisco IOS Software, C3560 Software\r\nCopyright (c) 1986-2010\r\n")
+            conn.sendall(VENDOR_BANNER.get(vendor, b"\r\n"))
             conn.sendall(b"\r\nUser Access Verification\r\n\r\nUsername: ")
             while True:
                 data = conn.recv(4096).decode("utf-8", errors="replace")
@@ -348,7 +532,7 @@ class MockTelnetServer(threading.Thread):
                             continue
                         if resp == "ENABLE":
                             enabled = True
-                            prompt = "CORE-SW-TL#"
+                            prompt = prompt.replace(">", "#", 1)
                             stage = "cli"
                             conn.sendall(f"\r\n{prompt} ".encode())
                             continue
@@ -361,7 +545,7 @@ class MockTelnetServer(threading.Thread):
                             conn.sendall(f"\r\n{prompt} ".encode())
                             continue
                         enabled = True
-                        prompt = "CORE-SW-TL#"
+                        prompt = prompt.replace(">", "#", 1)
                         stage = "cli"
                         conn.sendall(f"\r\n{prompt} ".encode())
         except (OSError, socket.timeout):

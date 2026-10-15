@@ -2,7 +2,7 @@
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
 
-const state = { devices: [], sites: [], editingId: null, editingSiteId: null, settings: {}, polling: null, importFile: null, me: null, users: [] };
+const state = { devices: [], sites: [], editingId: null, editingSiteId: null, settings: {}, polling: null, importFile: null, me: null, users: [], vendors: {} };
 
 /** 在线状态圆点 */
 function onlineDot(dev) {
@@ -333,12 +333,68 @@ $('#btn-test-ad').addEventListener('click', async () => {
 });
 
 /* ------------------------------------------------------------- 设备列表 */
+const VENDOR_LABELS = {
+  cisco: 'Cisco', h3c: 'H3C', huawei: '华为', ruijie: '锐捷',
+};
+
+function vendorOf(dev) {
+  return VENDOR_LABELS[dev.device_type] || dev.device_type || 'Cisco';
+}
+
+function vendorPill(dev) {
+  const v = dev.device_type || 'cisco';
+  const cls = { cisco: 'cisco', h3c: 'h3c', huawei: 'huawei', ruijie: 'ruijie' }[v] || '';
+  return `<span class="pill vendor-pill ${cls}">${esc(vendorOf(dev))}</span>`;
+}
+
 async function loadDevices() {
   state.devices = await api('/api/devices');
   renderStats();
   renderDevices();
   fillDeviceSelects();
 }
+
+/** 载入厂商清单并填充下拉 */
+async function loadVendors() {
+  try {
+    const list = await api('/api/vendors');
+    state.vendors = Object.fromEntries(list.map((v) => [v.id, v]));
+    $('#f-vendor').innerHTML = list
+      .map((v) => `<option value="${v.id}">${esc(v.label)}</option>`)
+      .join('');
+    applyVendorDefaults();
+  } catch (e) {
+    // 接口不可用时保留 HTML 里的静态选项
+  }
+}
+
+/** 按当前厂商套用默认端口与命令 */
+function applyVendorDefaults(force) {
+  const vid = $('#f-vendor').value;
+  const cfg = state.vendors[vid];
+  if (!cfg) return;
+  const portEl = $('#f-port');
+  if (force || !portEl.value) portEl.value = cfg.default_port;
+  const cmdsEl = $('#f-commands');
+  const current = cmdsEl.value.split('\n').map((s) => s.trim()).filter(Boolean);
+  // 强制填充，或当前内容还是默认值时才自动替换
+  const isDefaultish = !current.length ||
+    current.join('|') === 'show running-config|show cdp neighbors detail' ||
+    current.join('|') === 'display current-configuration|display lldp neighbor brief' ||
+    current.join('|') === 'display current-configuration|display lldp neighbor-information';
+  if (force || isDefaultish) {
+    cmdsEl.value = cfg.default_commands.join('\n');
+  }
+  // Cisco 才需要 enable 密码
+  const enEl = $('#f-enable').closest('label');
+  if (enEl) enEl.style.opacity = cfg.needs_enable ? '1' : '.45';
+}
+
+$('#f-vendor').addEventListener('change', () => applyVendorDefaults(true));
+$('#btn-fill-default-cmds').addEventListener('click', () => {
+  applyVendorDefaults(true);
+  toast('已按厂商填充默认采集命令', 'ok');
+});
 
 function renderStats() {
   const total = state.devices.length;
@@ -367,7 +423,8 @@ function renderDevices(filter = '') {
     if (onFilter === '0' && d.online !== 0) return false;
     if (onFilter === 'unk' && (d.online === 1 || d.online === 0)) return false;
     if (!kw) return true;
-    return [d.name, d.host, d.site, d.note].some((x) => (x || '').toLowerCase().includes(kw));
+    return [d.name, d.host, d.site, d.note, vendorOf(d)]
+      .some((x) => (x || '').toLowerCase().includes(kw));
   });
   const tb = $('#device-table tbody');
   $('#device-empty').classList.toggle('hidden', rows.length > 0);
@@ -395,6 +452,7 @@ function renderDevices(filter = '') {
       return `<tr data-id="${d.id}">
         <td>${onlineDot(d)}</td>
         <td><div class="dev-name">${esc(d.name)}</div><div class="dev-host">${esc(d.host)}</div></td>
+        <td>${vendorPill(d)}</td>
         <td>${siteCell}</td>
         <td><span class="pill ${d.protocol}">${d.protocol.toUpperCase()}</span>
             <div class="dev-host">:${d.port}</div></td>
@@ -861,6 +919,8 @@ function openDeviceModal(dev) {
   $('#f-name').value = dev ? dev.name : '';
   $('#f-host').value = dev ? dev.host : '';
   $('#f-protocol').value = dev ? dev.protocol : 'ssh';
+  $('#f-vendor').value = dev ? (dev.device_type || 'cisco') : 'cisco';
+  applyVendorDefaults(!dev);
   $('#f-port').value = dev ? dev.port : '';
   $('#f-username').value = dev ? dev.username : '';
   $('#f-password').value = '';
@@ -884,6 +944,7 @@ $('#btn-save-device').addEventListener('click', async () => {
     name: $('#f-name').value.trim(),
     host: $('#f-host').value.trim(),
     protocol: $('#f-protocol').value,
+    device_type: $('#f-vendor').value,
     port: Number($('#f-port').value) || ($('#f-protocol').value === 'telnet' ? 23 : 22),
     username: $('#f-username').value.trim(),
     password: $('#f-password').value,
@@ -1106,6 +1167,7 @@ function pollBackups() {
 }
 
 loadMe();
+loadVendors();
 loadSites();
 loadDevices();
 loadHistory();

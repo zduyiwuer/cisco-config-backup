@@ -1,4 +1,8 @@
-"""采集层公共接口与工具函数。"""
+"""采集层公共接口与工具函数。
+
+注意：本模块刻意不 import app.vendors，避免与 vendors 形成循环依赖。
+厂商相关判断通过参数传入 vendor 标识。
+"""
 
 from __future__ import annotations
 
@@ -71,9 +75,42 @@ def clean_output(raw: str, command: str, prompt: str = "") -> str:
     return re.sub(r"\n{3,}", "\n\n", text) + "\n"
 
 
-VERSION_RE = re.compile(r"Cisco IOS.*?Version\s+([^\s,]+)", re.IGNORECASE)
+VERSION_PATTERNS: dict[str, str] = {
+    # Cisco IOS / NX-OS / IOS-XE
+    # "Cisco IOS Software, C3560 Software (...), Version 15.2(4)E7, RELEASE SOFTWARE"
+    "cisco": r"(?:Cisco\s+\S+|NX-OS|IOS-XE)[^\n]*?,\s*Version\s+([^\s,]+)",
+    # H3C Comware: "H3C Comware Software, Version 7.1.070, Release 3111P05"
+    "h3c": r"(?:H3C|HPE)[^\n]*?Version\s+([^\s,]+)",
+    # 华为 VRP: "VRP (R) software, Version 8.180 (CE6865 V200R023C10)"
+    "huawei": r"VRP[^,\n]*software,\s*Version\s+([^\s,(]+)",
+    "ruijie": r"\bVersion\s+([^\s,]+)",
+}
+
+# 配置里裸的 "version 15.2" 行：仅在厂商专属正则都没命中时才用
+_CONFIG_VERSION_FALLBACK = re.compile(
+    r"^\s*version\s+(\S+)\s*$", re.M | re.IGNORECASE
+)
 
 
-def parse_os_version(text: str) -> str | None:
-    m = VERSION_RE.search(text or "")
+def parse_os_version(text: str, vendor: str = "cisco") -> str | None:
+    """从配置或版本输出里提取系统版本号。
+
+    先按厂商用专属正则；都不命中时，才回退到配置里的裸 `version X.Y` 行
+    （这条兜底放在最后，避免它抢在厂商正则前面匹配到错误内容）。
+    """
+    if not text:
+        return None
+    patterns = [VERSION_PATTERNS.get(vendor)]
+    # 兜底：厂商专属正则没命中时，试其他厂商的
+    patterns += [p for k, p in VERSION_PATTERNS.items() if k != vendor]
+    for pattern in patterns:
+        if not pattern:
+            continue
+        m = re.search(pattern, text, re.IGNORECASE)
+        if m:
+            # 有些正则含两个捕获组，取第一个非空
+            for g in m.groups():
+                if g:
+                    return g.strip().rstrip(",;")
+    m = _CONFIG_VERSION_FALLBACK.search(text)
     return m.group(1) if m else None
