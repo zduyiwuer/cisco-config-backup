@@ -43,9 +43,26 @@
 
 ### Windows 一键启动（推荐日常使用）
 
-双击 **`启动服务.bat`**，浏览器会自动打开管理界面。
+| 脚本 | 用途 |
+|---|---|
+| **`启动服务.bat`** | 前台启动，窗口保持打开，关窗口即停止服务 |
+| **`后台启动服务.bat`** | **后台启动**，无控制台窗口，关掉启动窗口不影响服务 |
+| **`关闭服务.bat`** | 一键停止后台服务 |
+| **`安装开机自启.bat`** | 开机自动启动（需右键选「以管理员身份运行」） |
 
-首次运行会自动创建运行环境并安装依赖（约 1-2 分钟），之后启动只需几秒。窗口保持打开，关闭窗口即停止服务。
+首次运行会自动创建运行环境并安装依赖（约 1-2 分钟），之后启动只需几秒。
+
+需要无值守运行时用 `后台启动服务.bat`，之后随时双击 `关闭服务.bat` 停止。
+
+也可以在命令行直接管理：
+
+```bash
+.venv\Scripts\python scripts\daemonctl.py status    # 查看状态
+.venv\Scripts\python scripts\daemonctl.py start     # 后台启动
+.venv\Scripts\python scripts\daemonctl.py stop      # 停止
+```
+
+后台运行的日志在 `data/service.log`，PID 记录在 `data/service.pid`。
 
 ### Linux 部署
 
@@ -369,7 +386,10 @@ cisco-backup/
 │   ├── js_smoke.js            前端脚本冒烟测试
 │   └── seed_demo.py           生成演示数据
 ├── data/                      数据库与密钥（运行时生成）
-├── 启动服务.bat               Windows 一键启动（自动装依赖+开浏览器）
+├── 启动服务.bat               Windows 前台启动（自动装依赖+开浏览器）
+├── 后台启动服务.bat           Windows 后台启动（无窗口，可关窗口）
+├── 关闭服务.bat               Windows 一键停止后台服务
+├── 安装开机自启.bat           配置开机自启（需管理员权限）
 ├── 安装开机自启.bat            注册为 Windows 开机自启服务（需 NSSM）
 └── run.py                     启动脚本
 ```
