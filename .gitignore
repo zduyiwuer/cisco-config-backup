@@ -81,4 +81,11 @@ tests/_*.py
 !deploy/*.sh
 #产品自带的 Windows 启动脚本（用户双击即用，不能被忽略）
 !启动服务.bat
+!后台启动服务.bat
 !安装开机自启.bat
+!关闭服务.bat
+
+# 后台服务运行时产生的文件
+data/service.pid
+data/service.log
+data/_launch.vbs

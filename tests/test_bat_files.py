@@ -20,8 +20,9 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 
 PASS, FAIL = 0, 0
-BAT_FILES = ["启动服务.bat", "安装开机自启.bat"]
-TPL_FILES = ["_start_bat.tpl", "_autostart_bat.tpl"]
+BAT_FILES = ["启动服务.bat", "后台启动服务.bat", "安装开机自启.bat", "关闭服务.bat"]
+TPL_FILES = ["_start_bat.tpl", "_daemon_start_bat.tpl",
+             "_autostart_bat.tpl", "_daemon_stop_bat.tpl"]
 
 
 def _kill_tree(proc: subprocess.Popen) -> None:
@@ -108,6 +109,14 @@ def main() -> int:
         ("chcp 936", "设置 GBK 代码页"),
     ]:
         check(f"启动脚本含「{desc}」", needle in start, f"缺 {needle}")
+
+    for name, needle, desc in [
+        ("后台启动服务.bat", "daemonctl.py start", "调用后台启动"),
+        ("后台启动服务.bat", "chcp 936", "设置 GBK 代码页"),
+        ("关闭服务.bat", "daemonctl.py stop", "调用停止"),
+    ]:
+        txt = (ROOT / name).read_bytes().decode("gbk")
+        check(f"{name} 含「{desc}」", needle in txt)
 
     auto = (ROOT / "安装开机自启.bat").read_bytes().decode("gbk")
     for needle, desc in [

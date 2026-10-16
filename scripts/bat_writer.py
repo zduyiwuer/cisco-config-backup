@@ -42,5 +42,7 @@ def convert(tpl_name: str, bat_name: str) -> None:
 
 if __name__ == "__main__":
     convert("_start_bat.tpl", "启动服务.bat")
+    convert("_daemon_start_bat.tpl", "后台启动服务.bat")
     convert("_autostart_bat.tpl", "安装开机自启.bat")
+    convert("_daemon_stop_bat.tpl", "关闭服务.bat")
     sys.exit(0)
