@@ -76,6 +76,43 @@ data/
 tar czf cisco-backup-data-$(date +%Y%m%d).tar.gz data/
 ```
 
+### 开机自启
+
+`docker-compose.yml` 里已配置 `restart: unless-stopped`，容器会随 Docker 守护进程重启而恢复。但**很多服务器装完 Docker 后并没有设开机自启**，此时重启机器容器不会起来。
+
+用一键脚本配好（会同时处理 Docker 自启 + 容器守护）：
+
+```bash
+sudo ./deploy/install_autostart.sh
+```
+
+脚本做三件事：
+
+1. `systemctl enable docker` —— Docker 守护进程开机启动
+2. 创建 `cisco-backup-backup.service` —— 用 systemd 管理 compose 项目，开机自动拉起
+3. 创建 `cisco-backup-backup-check.timer` —— **每 2 分钟巡检一次**，容器停了或健康检查失败就自动拉起
+
+第3 条是额外的保险。`restart: unless-stopped` 依赖 Docker 守护进程活着，但守护进程出问题时容器就没人管了；巡检服务独立于 Docker，Docker 挂了它还能尝试拉起。
+
+验证：
+
+```bash
+systemctl status cisco-backup-backup        # 主服务
+systemctl list-timers | grep cisco-backup   # 确认定时器在跑
+systemctl status cisco-backup-backup-check  # 看上次巡检结果
+
+sudo reboot# 重启后用上面命令验证
+```
+
+如果用的是 systemd 部署（`install_systemd.sh`），服务本身就是开机自启，无需额外操作。
+
+常用命令：
+
+```bash
+systemctl restart cisco-backup-backup   # 重启服务
+journalctl -u cisco-backup-backup-check -f  # 看巡检日志
+```
+
 ## 二、systemd 部署
 
 适合已有 Python 环境的服务器，不需要 Docker。
