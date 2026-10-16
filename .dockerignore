@@ -1,0 +1,53 @@
+# ============================================================
+#  Docker 构建上下文排除
+#  缺这个文件时 docker 会把 .git、data/（含数据库与密钥）、
+#  .venv/ 全部传给构建器，在磁盘紧张的服务器上会直接撑爆
+# ============================================================
+
+# 数据与凭据（绝对不能进镜像）
+data/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite*
+.secret_key
+*.log
+.env
+
+# 依赖与缓存
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# 文档与测试（运行不需要）
+tests/
+README.md
+CHANGELOG.md
+LICENSE
+*.md
+
+# 部署文件（Docker 部署用不到 systemd 那套）
+deploy/
+# 注意：scripts/ 整个目录要进镜像，
+# scripts/reset_admin_password.py 是容器内忘记密码时的救援入口，不要排除
+
+# 系统脚本（Windows 专用）
+启动服务.bat
+安装开机自启.bat
+
+# 编辑器与系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp

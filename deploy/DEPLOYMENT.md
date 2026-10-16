@@ -193,6 +193,54 @@ sudo systemctl restart systemd-journald
 
 ## 五、常见问题
 
+**Q：构建时报 `No space left on device`（磁盘空间不足）？**
+
+这是构建镜像时磁盘满了，依赖装到一半写不下去。按顺序排查：
+
+```bash
+# 1. 看各分区剩余空间，确认是哪个盘满了
+df -h
+
+# 2. 看 Docker 占了多少
+docker system df
+
+# 3. 清理（最有效，通常能释放几个 GB）
+docker builder prune -af# 清构建缓存，安全
+docker image prune -af              # 清无用镜像
+docker container prune -f           # 清停止的容器
+# 网络与卷谨慎清理：docker volume prune 会删数据卷
+
+# 4. 看大文件都占在哪
+du -sh /var/lib/docker/*
+journalctl --disk-usage               # systemd 日志也可能很大
+```
+
+清理后重新构建。如果根分区本身就小于 4GB，建议改用 systemd 部署（不占 Docker 空间）：
+
+```bash
+sudo ./deploy/install_systemd.sh
+```
+
+> 本项目的 `.dockerignore` 已排除 `.git/`、`data/`、`.venv/`，
+> Dockerfile 采用多阶段构建且不使用 gcc 工具链，
+> 构建峰值空间约 1GB 以内，不会把磁盘吃满。
+
+**Q：日志里出现 `Warning pull access denied ... repository does not exist`？**
+
+`docker-compose.yml` 中已设`pull_policy: never`，表示只用本地构建。
+若仍出现，说明用的是旧版 compose 文件，执行 `git pull` 更新即可。
+这条只是警告，不影响构建。
+
+**Q：构建时报 `Failed building wheel for xxx`？**
+
+本项目依赖在主流平台都有预编译 wheel，Dockerfile 默认不装编译工具链以节省空间。
+若在特殊平台（如某些 ARM 镜像）确实需要编译，解开 Dockerfile 第 23-25 行的注释：
+
+```dockerfile
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        gcc libc6-dev libssl-dev && rm -rf /var/lib/apt/lists/*
+```
+
 **Q：Docker 里生成的密码在哪看？**
 ```bash
 docker compose logs cisco-backup | grep -A4 "默认管理员"
