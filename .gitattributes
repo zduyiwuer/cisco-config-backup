@@ -29,3 +29,6 @@
 *.service text eol=lf
 Dockerfile text eol=lf
 .gitignore text eol=lf
+# Windows 批处理必须是 GBK 编码 + CRLF 行尾，
+# 用 -text 阻止 git 自动转换，保持仓库里的文件字节与本地一致
+*.bat -text
