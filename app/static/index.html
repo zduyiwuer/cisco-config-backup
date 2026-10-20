@@ -178,10 +178,29 @@
   <!-- 邻居 -->
   <section id="tab-neighbors" class="tab-panel">
     <div class="toolbar">
+      <select id="neighbor-site">
+        <option value="">全部门店</option>
+      </select>
       <select id="neighbor-device"><option value="">全部设备</option></select>
+      <button class="btn ghost" id="btn-load-topology">拓扑视图</button>
     </div>
+    <div class="stats" id="neighbor-stats"></div>
+
+    <!-- 门店拓扑：跨设备互联关系 -->
+    <div class="card hidden" id="topology-card">
+      <div class="topo-head">
+        <h3>互联拓扑</h3>
+        <div class="topo-legend">
+          <span><i class="dot ok"></i>在线</span>
+          <span><i class="dot off"></i>离线</span>
+          <span><i class="dot ext"></i>外部设备</span>
+        </div>
+      </div>
+      <div id="topology-body"></div>
+    </div>
+
     <div class="card" id="neighbor-card">
-      <div class="empty">选择一个设备查看它的 CDP 邻居。</div>
+      <div class="empty">选择门店查看互联拓扑，或选择单台设备查看它的邻居。</div>
     </div>
   </section>
 

@@ -219,3 +219,95 @@ def neighbors_of(device_id: int) -> list[dict[str, Any]]:
         if rows:
             return rows
     return []
+
+
+def topology_of(site_id: int | None = None, device_ids: list[int] | None = None) -> dict[str, Any]:
+    """按门店（或指定设备集合）聚合邻居关系，用于绘制拓扑。
+
+    返回设备节点与连线：
+      nodes: 本门店内的设备（含 IP、厂商、状态、是否在线）
+      links: A 连B 的关系，含两端接口信息
+
+    跨门店的邻居也会记录在对端字段里，但不会作为节点出现在图上，
+    因为它们不属于本门店，前端用「外部设备」样式区分。
+    """
+    if device_ids:
+        devices = [db.get_device(i) for i in device_ids]
+        devices = [d for d in devices if d]
+    else:
+        devices = db.list_devices(site_id=site_id)
+
+    nodes: list[dict[str, Any]] = []
+    links: list[dict[str, Any]] = []
+    # 设备名 -> 节点，用于判断邻居是否在同一批设备里
+    by_name: dict[str, dict[str, Any]] = {}
+
+    for dev in devices:
+        node = {
+            "id": dev["id"],
+            "name": dev["name"],
+            "host": dev["host"],
+            "vendor": vendors.normalize_vendor(dev.get("device_type")),
+            "online": dev.get("online"),
+            "enabled": dev.get("enabled", 1),
+            "site": dev.get("site") or "",
+            "neighbor_count": 0,
+        }
+        nodes.append(node)
+        by_name[dev["name"]] = node
+        # CDP 的 Device ID 常带域名后缀（如 SW-01.corp.local），
+        # 而设备表里记的是短名。按短名与主机名各存一份索引，
+        # 否则互联关系会被误判为「外部设备」。
+        short = dev["name"].split(".")[0]
+        by_name.setdefault(short, node)
+        if dev.get("host"):
+            by_name.setdefault(dev["host"], node)
+
+    for dev in devices:
+        try:
+            rows = neighbors_of(dev["id"])
+        except Exception:
+            # 单台设备的解析异常不应让整个门店拓扑失败
+            continue
+        for r in rows:
+            peer_name = (r.get("device_id") or "").strip()
+            if not peer_name:
+                continue
+            # 先按原名找，再按短名（去域名后缀）找
+            peer = by_name.get(peer_name) or by_name.get(peer_name.split(".")[0])
+            links.append({
+                "source_id": dev["id"],
+                "source_name": dev["name"],
+                "target_id": peer["id"] if peer else None,
+                "target_name": peer["name"] if peer else peer_name,
+                "in_scope": peer is not None,
+                "local_interface": r.get("local_interface") or "",
+                "remote_interface": r.get("remote_interface") or "",
+                "platform": r.get("platform") or "",
+                "ip": r.get("ip") or "",
+            })
+            if peer is not None:
+                peer["neighbor_count"] += 1
+
+    # 同一对设备可能有多条链路（互联口），按两端接口去重
+    seen: set[tuple] = set()
+    unique_links: list[dict[str, Any]] = []
+    for link in links:
+        key = (
+            link["source_name"],
+            link["target_name"],
+            link["local_interface"],
+            link["remote_interface"],
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        unique_links.append(link)
+
+    return {
+        "site_id": site_id,
+        "nodes": nodes,
+        "links": unique_links,
+        "device_count": len(nodes),
+        "link_count": len(unique_links),
+    }

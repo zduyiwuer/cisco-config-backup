@@ -1331,13 +1331,19 @@ async function openDetail(id) {
 async function loadNeighbors() {
   const did = $('#neighbor-device').value;
   const card = $('#neighbor-card');
+  $('#topology-card').classList.add('hidden');
   if (!did) {
-    card.innerHTML = '<div class="empty">选择一个设备查看它的 CDP 邻居。</div>';
+    card.innerHTML = '<div class="empty">选择门店查看互联拓扑，或选择单台设备查看它的邻居。</div>';
+    $('#neighbor-stats').innerHTML = '';
     return;
   }
   const data = await api(`/api/devices/${did}/neighbors`);
+  $('#neighbor-stats').innerHTML = `
+    <div class="stat"><div class="label">本端设备</div><div class="value" style="font-size:15px">${esc(data.device)}</div></div>
+    <div class="stat brand"><div class="label">邻居数量</div><div class="value">${data.neighbors.length}</div></div>`;
   if (!data.neighbors.length) {
-    card.innerHTML = `<div class="empty">设备「${esc(data.device)}」最近一次备份中没有 CDP 邻居信息。</div>`;
+    card.innerHTML = `<div class="empty">设备「${esc(data.device)}」最近一次备份中没有解析到邻居信息。<br>
+      <span style="font-size:12.5px">请确认该厂商的邻居命令采集成功，且备份时间在邻居变更之后</span></div>`;
     return;
   }
   card.innerHTML = `<div class="nb-grid">${data.neighbors.map((n) => `
@@ -1350,11 +1356,102 @@ async function loadNeighbors() {
     </div>`).join('')}</div>`;
 }
 
+/* ---------------------------------------------------- 门店拓扑 */
+/** 加载互联拓扑并渲染 */
+async function loadTopology() {
+  const siteId = $('#neighbor-site').value;
+  const qs = siteId === '' ? '' : `?site_id=${encodeURIComponent(siteId)}`;
+  const card = $('#topology-card');
+  const body = $('#topology-body');
+
+  card.classList.remove('hidden');
+  $('#neighbor-card').classList.add('hidden');
+  body.innerHTML = '<div class="empty">正在加载拓扑…</div>';
+
+  let t;
+  try {
+    t = await api('/api/topology' + qs);
+  } catch (e) {
+    body.innerHTML = `<div class="empty">加载失败：${esc(e.message)}</div>`;
+    return;
+  }
+
+  $('#neighbor-stats').innerHTML = `
+    <div class="stat"><div class="label">设备数</div><div class="value">${t.device_count}</div></div>
+    <div class="stat brand"><div class="label">互联关系</div><div class="value">${t.link_count}</div></div>
+    <div class="stat ok"><div class="label">在线</div>
+      <div class="value">${t.nodes.filter((n) => n.online === 1).length}</div></div>
+    <div class="stat err"><div class="label">离线</div>
+      <div class="value">${t.nodes.filter((n) => n.online === 0).length}</div></div>`;
+
+  if (!t.nodes.length) {
+    body.innerHTML = '<div class="empty">该范围内没有设备。</div>';
+    return;
+  }
+
+  // 设备名 -> 节点，供连线查接口
+  const nodeMap = new Map(t.nodes.map((n) => [n.name, n]));
+  // 有互联的设备排前面，更直观
+  const sorted = [...t.nodes].sort((a, b) => b.neighbor_count - a.neighbor_count);
+  const maxLinks = Math.max(1, ...sorted.map((n) => n.neighbor_count));
+
+  const external = t.links.filter((l) => !l.in_scope);
+  const internal = t.links.filter((l) => l.in_scope);
+
+  body.innerHTML = `
+    ${sorted.length ? `<div class="topo-nodes">${sorted.map((n) => `
+      <div class="topo-node ${n.online === 1 ? 'on' : n.online === 0 ? 'off' : ''}">
+        <div class="topo-node-head">
+          <span class="topo-dot"></span>
+          <b title="${esc(n.name)}">${esc(n.name)}</b>
+        </div>
+        <div class="topo-node-meta mono">${esc(n.host)}</div>
+        <div class="topo-node-tags">
+          <span class="pill">${esc(VENDOR_LABELS[n.vendor] || n.vendor)}</span>
+          ${n.neighbor_count ? `<span class="pill new">${n.neighbor_count} 条互联</span>` : ''}
+        </div>
+        <div class="topo-bar"><div class="topo-bar-fill" style="width:${(n.neighbor_count / maxLinks) * 100}%"></div></div>
+      </div>`).join('')}</div>` : ''}
+
+    ${t.link_count ? `<div class="topo-links">
+      <div class="fail-col-title">互联关系明细</div>
+      <table class="grid topo-link-table">
+        <thead><tr><th>本端设备</th><th>本端接口</th><th>对端设备</th><th>对端接口</th><th>范围</th></tr></thead>
+        <tbody>
+          ${internal.map((l) => linkRow(l, nodeMap)).join('')}
+          ${external.map((l) => linkRow(l, nodeMap)).join('')}
+        </tbody>
+      </table>
+    </div>` : '<div class="empty">该范围内没有解析到互联关系。<br><span style="font-size:12.5px">需先对设备执行一次备份，采集邻居信息后才会有数据</span></div>'}
+  `;
+}
+
+function linkRow(l, nodeMap) {
+  const src = nodeMap.get(l.source_name);
+  const dot = (n) => (n && n.online === 1 ? 'ok' : n && n.online === 0 ? 'err' : '');
+  return `<tr class="${l.in_scope ? '' : 'row-external'}">
+    <td><span class="pill ${dot(src)}">${esc(l.source_name)}</span></td>
+    <td class="mono">${esc(l.local_interface) || '—'}</td>
+    <td>${esc(l.target_name)}</td>
+    <td class="mono">${esc(l.remote_interface) || '—'}</td>
+    <td>${l.in_scope
+      ? '<span class="pill">本门店</span>'
+      : '<span class="pill warn" title="对端设备不属于当前筛选范围">外部</span>'}</td>
+  </tr>`;
+}
+
 function fillDeviceSelects() {
   const opts = '<option value="">全部设备</option>' +
     state.devices.map((d) => `<option value="${d.id}">${esc(d.name)}${d.site ? ' · ' + esc(d.site) : ''}</option>`).join('');
   $('#history-device').innerHTML = opts;
   $('#neighbor-device').innerHTML = opts;
+
+  // 邻居页门店筛选（保留当前选择）
+  const curNbSite = $('#neighbor-site').value;
+  $('#neighbor-site').innerHTML = '<option value="">全部门店</option>' +
+    state.sites.map((s) => `<option value="${s.id}">${esc(s.name)}</option>`).join('') +
+    '<option value="0">仅未归属设备</option>';
+  $('#neighbor-site').value = curNbSite;
 
   // 历史页门店筛选（保留当前选择，避免刷新后重置）
   const curSite = $('#history-site').value;
@@ -1426,6 +1523,19 @@ $('#btn-backup-all').addEventListener('click', async () => {
 $('#device-search').addEventListener('input', (e) => renderDevices(e.target.value));
 $('#history-device').addEventListener('change', loadHistory);
 $('#neighbor-device').addEventListener('change', loadNeighbors);
+// 门店变化时，设备下拉只列该门店的设备
+$('#neighbor-site').addEventListener('change', () => {
+  const siteId = $('#neighbor-site').value;
+  const opts = '<option value="">全部设备</option>' +
+    state.devices
+      .filter((d) => siteId === '' || (siteId === 'none'
+        ? !d.site_id
+        : String(d.site_id) === siteId))
+      .map((d) => `<option value="${d.id}">${esc(d.name)}</option>`).join('');
+  $('#neighbor-device').innerHTML = opts;
+  loadNeighbors();
+});
+$('#btn-load-topology').addEventListener('click', loadTopology);
 
 $$('.tab').forEach((t) => t.addEventListener('click', () => {
   $$('.tab').forEach((x) => x.classList.remove('active'));

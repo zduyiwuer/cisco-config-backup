@@ -760,11 +760,29 @@ def api_backup_device(device_id: int, request: Request) -> dict[str, Any]:
 
 
 @app.get("/api/devices/{device_id}/neighbors")
-def api_neighbors(device_id: int) -> dict[str, Any]:
+def api_neighbors(device_id: int, request: Request) -> dict[str, Any]:
+    require_role(request, "viewer")
     device = db.get_device(device_id)
     if not device:
         raise HTTPException(status_code=404, detail="设备不存在")
     return {"device": device["name"], "neighbors": collector.neighbors_of(device_id)}
+
+
+@app.get("/api/topology")
+def api_topology(
+    request: Request,
+    site_id: int | None = None,
+    all_sites: bool = False,
+) -> dict[str, Any]:
+    """邻居拓扑：默认全量，按 site_id 可限定单个门店。
+
+    site_id 传 0 表示只看未归属门店的设备；
+    all_sites=true 时忽略 site_id，查看所有设备的互联关系。
+    """
+    require_role(request, "viewer")
+    if all_sites:
+        site_id = None
+    return collector.topology_of(site_id=site_id)
 
 
 # ------------------------------------------------------------------- backups
