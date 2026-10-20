@@ -1,5 +1,5 @@
 # ============================================================
-#  Linux 部署指南
+#  多厂商网络设备配置备份中心 - 部署指南
 #  提供两种方式：Docker（推荐）与 systemd + venv
 # ============================================================
 
@@ -307,14 +307,68 @@ Docker 方式不依赖服务器 Python，直接用 `Dockerfile` 里的 3.12。
 
 ## 六、升级
 
-```bash
-# Docker
-git pull && docker compose up -d --build
+### 一键更新（推荐）
 
-# systemd
-cd /opt/cisco-backup && sudo -u cisco-backup git pull
+```bash
+./deploy/update.sh
+```
+
+脚本会依次完成：检查磁盘空间 → 备份数据 → 拉取代码 → 重新构建镜像 →
+重建容器 → 等待健康检查通过。构建失败会自动回滚代码。
+
+其他用法：
+
+```bash
+./deploy/update.sh --check-only  # 只看有什么更新，不执行
+./deploy/update.sh --no-backup   # 跳过备份（磁盘紧张时用）
+```
+
+更新完成后如需回滚（容器退回上一版本）：
+
+```bash
+docker compose down
+git checkout <旧版本号>
+docker compose up -d --build
+```
+
+### 手动更新
+
+```bash
+git pull && docker compose up -d --build
+```
+
+数据库结构变更会在启动时自动迁移，无需手动处理，老数据完整保留。
+
+### 数据为什么不会丢
+
+备份数据都在宿主机的 `./data` 目录，通过卷挂载到容器：
+
+```yaml
+volumes:
+  - ./data:/app/data
+```
+
+`docker compose up --build` 只是重建容器镜像，`./data` 目录原样保留，因此：
+
+- `cisco_backup.db` 数据库不受影响
+- `.secret_key` 加密密钥不受影响
+- `backups/` 下的历史备份文件不受影响
+
+### ⚠️ 密钥丢失的后果
+
+**`.secret_key` 丢失会导致所有已保存的设备密码无法解密**，表现为备份全部
+报「SSH 认证失败」，即使你重新填了正确密码也不行（因为存的是密文）。
+
+- 密钥在 `data/.secret_key`，容器重建不会丢
+- 但如果你执行过 `docker compose down -v`（带 `-v` 会删卷）、或手动删除过
+  `data` 目录，就无法恢复了
+- 迁移或备份时务必把 `data` 目录整个复制，不要只拷 `.db`
+
+### systemd 部署的升级
+
+```bash
+cd /opt/cisco-backup
+sudo -u cisco-backup git pull
 sudo -u cisco-backup .venv/bin/pip install -r requirements.txt
 sudo systemctl restart cisco-backup
 ```
-
-数据库结构变更会自动迁移，无需手动处理，老数据完整保留。
