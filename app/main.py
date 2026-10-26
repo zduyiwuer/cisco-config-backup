@@ -662,6 +662,28 @@ def api_probe_history(device_id: int, limit: int = 50) -> dict[str, Any]:
     return {"device_id": device_id, "history": db.probe_history(device_id, min(limit, 200))}
 
 
+@app.post("/api/devices/{device_id}/probe")
+def api_probe_one(device_id: int, request: Request) -> dict[str, Any]:
+    """只探测这一台设备。
+
+    与「测试」的区别：
+    - 探测只做 TCP/SSH banner 握手，不认证、不采集配置，快且不影响设备负载
+    - 测试是完整 SSH 登录，验证账号密码是否正确
+
+    探测结果会落库并更新设备的在线状态。
+    """
+    require_role(request, "operator")
+    device = db.get_device(device_id)
+    if not device:
+        raise HTTPException(status_code=404, detail="设备不存在")
+    settings = db.get_settings()
+    timeout = int(settings.get("probe_timeout", 5))
+    result = probe.probe_device(device, timeout)
+    # 带上最近几次探测记录，方便看这台设备的连通性趋势
+    result["history"] = db.probe_history(device_id, 10)
+    return result
+
+
 # --------------------------------------------------------------------- vendors
 @app.get("/api/vendors")
 def api_list_vendors() -> list[dict[str, Any]]:

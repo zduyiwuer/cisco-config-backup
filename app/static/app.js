@@ -18,6 +18,25 @@ function onlineDot(dev) {
   return '<span class="dot unk"><i></i>未探测</span>';
 }
 
+/** 单台探测后就地更新该行的在线圆点，不整表重绘 */
+function updateDeviceOnlineDot(dev, result) {
+  dev.online = result.online ? 1 : 0;
+  dev.probe_latency_ms = result.latency_ms;
+  if (!result.online) {
+    dev.consecutive_fails = (dev.consecutive_fails || 0) + 1;
+  } else {
+    dev.consecutive_fails = 0;
+  }
+  const row = document.querySelector(`#device-table tr[data-id="${dev.id}"]`);
+  if (!row) return;
+  const cell = row.querySelector('td');
+  if (!cell) return;
+  const holder = document.createElement('span');
+  holder.innerHTML = onlineDot(dev);
+  const dot = holder.firstElementChild;
+  if (dot) cell.replaceChildren(dot);
+}
+
 function toast(msg, kind = '') {
   const el = $('#toast');
   el.textContent = msg;
@@ -542,7 +561,8 @@ function renderDevices(filter = '') {
         <td>${backupCell}</td>
         <td><div class="actions">
           <button class="btn small primary act-backup">备份</button>
-          <button class="btn small act-test">测试</button>
+          <button class="btn small act-probe" title="仅探测连通性（不登录设备）">探测</button>
+          <button class="btn small act-test" title="完整 SSH 登录测试，验证账号密码">测试</button>
           <button class="btn small act-edit">编辑</button>
           <button class="btn small act-pkg" title="打包下载该设备">打包</button>
           <button class="btn small danger act-del">删除</button>
@@ -567,6 +587,21 @@ $('#device-table').addEventListener('click', async (e) => {
     } catch (err) { toast(err.message, 'err'); }
     await refreshAll();
     btn.disabled = false; btn.textContent = '备份';
+  } else if (btn.classList.contains('act-probe')) {
+    btn.disabled = true; btn.textContent = '探测…';
+    try {
+      const r = await api(`/api/devices/${id}/probe`, { method: 'POST' });
+      if (r.online) {
+        toast(`${r.name} 在线，延迟 ${r.latency_ms ?? '—'}ms`, 'ok');
+      } else {
+        toast(`${r.name} 离线：${r.error || '无响应'}`, 'err');
+      }
+      // 只更新该行的在线状态与延迟，避免整表重绘打断操作
+      updateDeviceOnlineDot(dev, r);
+    } catch (err) {
+      toast(err.message, 'err');
+    }
+    btn.disabled = false; btn.textContent = '探测';
   } else if (btn.classList.contains('act-test')) {
     btn.disabled = true; btn.textContent = '测试…';
     try {
@@ -635,9 +670,33 @@ async function loadProbe() {
       <td class="mono">${d.last_seen_at ? fmtTime(d.last_seen_at).slice(5) : '从未'}</td>
       <td>${fails}</td>
       <td style="max-width:220px;font-size:12px;color:var(--text-mute)">${esc((d.last_message || '').slice(0, 60))}</td>
+      <td><button class="btn small act-probe-one" data-id="${d.id}">探测</button></td>
     </tr>`;
   }).join('');
 }
+
+/* 在线监控页的单台探测：只探这一台，结果就地更新该行 */
+$('#probe-table').addEventListener('click', async (e) => {
+  const btn = e.target.closest('.act-probe-one');
+  if (!btn) return;
+  const id = Number(btn.dataset.id);
+  btn.disabled = true;
+  btn.textContent = '探测中…';
+  try {
+    const r = await api(`/api/devices/${id}/probe`, { method: 'POST' });
+    if (r.online) {
+      toast(`${r.name} 已恢复在线，延迟 ${r.latency_ms ?? '—'}ms`, 'ok');
+    } else {
+      toast(`${r.name} 仍离线：${r.error || '无响应'}`, 'err');
+    }
+    // 重新拉取监控数据，让统计与失败原因一起刷新
+    await loadProbe();
+  } catch (err) {
+    toast(err.message, 'err');
+  }
+  btn.disabled = false;
+  btn.textContent = '探测';
+});
 
 async function runProbeAll(btn) {
   const label = btn ? btn.textContent : '';
