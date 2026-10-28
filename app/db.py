@@ -979,6 +979,42 @@ def backup_stats(
     }
 
 
+def delete_backup(backup_id: int) -> bool:
+    """删除一条备份记录及其关联的文件、差异。
+
+    backup_files / backup_diffs 都是 ON DELETE CASCADE，
+    外键开启时会自动级联清理，这里只负责 backups 主记录。
+    返回是否真的删掉了。
+    """
+    with tx() as conn:
+        cur = conn.execute("DELETE FROM backups WHERE id = ?", (backup_id,))
+        return cur.rowcount > 0
+
+
+def delete_failed_backups(
+    device_id: int | None = None, before: str | None = None
+) -> int:
+    """批量删除失败的备份记录。
+
+    只删status='failed' 的，成功与进行中的记录一律保留。
+    device_id 传 None 表示所有设备；before 传时间则只删该时间之前的。
+    返回删除的条数。
+    """
+    clauses = ["status = 'failed'"]
+    params: list[Any] = []
+    if device_id is not None:
+        clauses.append("device_id = ?")
+        params.append(device_id)
+    if before:
+        clauses.append("started_at < ?")
+        params.append(before)
+    with tx() as conn:
+        cur = conn.execute(
+            f"DELETE FROM backups WHERE {' AND '.join(clauses)}", params
+        )
+        return cur.rowcount
+
+
 def get_backup(backup_id: int) -> dict[str, Any] | None:
     conn = get_conn()
     row = conn.execute(

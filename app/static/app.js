@@ -1280,7 +1280,11 @@ async function loadHistory() {
       <td>${change}</td>
       <td class="mono">${b.duration_ms != null ? b.duration_ms + ' ms' : '—'}</td>
       <td style="max-width:280px">${reason}</td>
-      <td><button class="btn small act-view" data-id="${b.id}">详情</button></td>
+      <td><div class="actions">
+        <button class="btn small act-view" data-id="${b.id}">详情</button>
+        ${failed ? `<button class="btn small danger act-del-backup" data-id="${b.id}"
+          title="删除这条失败记录">删除</button>` : ''}
+      </div></td>
     </tr>`;
   }).join('');
 
@@ -1341,9 +1345,47 @@ $('#btn-history-prev').addEventListener('click', () => {
 $('#btn-history-next').addEventListener('click', () => { historyState.page++; loadHistory(); });
 
 $('#history-table').addEventListener('click', async (e) => {
+  const delBtn = e.target.closest('.act-del-backup');
+  if (delBtn) {
+    const id = Number(delBtn.dataset.id);
+    if (!confirm('确定删除这条失败的备份记录？')) return;
+    delBtn.disabled = true;
+    try {
+      await api(`/api/backups/${id}`, { method: 'DELETE' });
+      toast('已删除该失败记录', 'ok');
+      await refreshHistory();
+    } catch (err) {
+      toast(err.message, 'err');
+      delBtn.disabled = false;
+    }
+    return;
+  }
   const btn = e.target.closest('.act-view');
   if (!btn) return;
   await openDetail(Number(btn.dataset.id));
+});
+
+/* 批量清除失败记录 */
+$('#btn-delete-failed').addEventListener('click', async () => {
+  const did = $('#history-device').value;
+  const scope = did ? '这台设备' : '全部设备';
+  if (!confirm(`确定删除${scope}的所有失败备份记录？\\n\\n成功的备份记录不受影响。`)) return;
+  const btn = $('#btn-delete-failed');
+  btn.disabled = true;
+  btn.textContent = '删除中…';
+  try {
+    const body = did ? { device_id: Number(did) } : {};
+    const r = await api('/api/backups/delete-failed', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    toast(`已删除 ${r.deleted} 条失败记录`, 'ok');
+    await refreshHistory();
+  } catch (err) {
+    toast(err.message, 'err');
+  }
+  btn.disabled = false;
+  btn.textContent = '清除失败记录';
 });
 
 async function openDetail(id) {

@@ -188,6 +188,12 @@ class ProbeAllIn(BaseModel):
     device_ids: list[int] | None = None
 
 
+class FailedCleanupIn(BaseModel):
+    """批量清理失败备份记录的范围。"""
+    device_id: int | None = None
+    before: str | None = None
+
+
 class LoginIn(BaseModel):
     username: str = Field(min_length=1, max_length=256)
     password: str = Field(min_length=1, max_length=256)
@@ -847,6 +853,31 @@ def api_backup_stats(
     """备份统计：成功/失败计数、失败原因 Top、失败设备排行。"""
     require_role(request, "viewer")
     return db.backup_stats(device_id=device_id, site_id=site_id)
+
+
+@app.delete("/api/backups/{backup_id}")
+def api_delete_backup(backup_id: int, request: Request) -> dict[str, Any]:
+    """删除单条备份记录（含其采集到的文件与差异）。"""
+    require_role(request, "admin")
+    backup = db.get_backup(backup_id)
+    if not backup:
+        raise HTTPException(status_code=404, detail="备份记录不存在")
+    db.delete_backup(backup_id)
+    return {"ok": True, "deleted": 1, "device_name": backup.get("device_name", "")}
+
+
+@app.post("/api/backups/delete-failed")
+def api_delete_failed_backups(payload: FailedCleanupIn, request: Request) -> dict[str, Any]:
+    """批量删除失败的备份记录。
+
+    可选参数 device_id 限定单台设备，before 限定时间。
+    只删失败记录，成功与进行中的一律保留。
+    """
+    require_role(request, "admin")
+    deleted = db.delete_failed_backups(
+        device_id=payload.device_id, before=payload.before
+    )
+    return {"ok": True, "deleted": deleted}
 
 
 @app.post("/api/backups")
