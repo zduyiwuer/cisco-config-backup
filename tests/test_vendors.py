@@ -214,10 +214,14 @@ def main() -> int:
         r = client.get("/api/vendors")
         check("GET /api/vendors", r.status_code == 200)
         vlist = r.json()
-        check("返回 4 个厂商", len(vlist) == 4, str(len(vlist)))
+        # 厂商数量会随支持范围增长，这里只校验接口与已登记厂商都齐全
+        from app import vendors as _v
+        check("厂商数量与 VENDORS 定义一致",
+              len(vlist) == len(_v.VENDORS),
+              f"{len(vlist)} vs {len(_v.VENDORS)}")
         ids = {v["id"] for v in vlist}
         check("厂商 id 齐全",
-              {"cisco", "h3c", "huawei", "ruijie"} <= ids, str(ids))
+              {"cisco", "h3c", "huawei", "ruijie", "fortinet"} <= ids, str(ids))
         h3c = next(v for v in vlist if v["id"] == "h3c")
         check("H3C 默认命令正确",
               "display current-configuration" in h3c["default_commands"],

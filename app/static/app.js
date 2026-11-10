@@ -354,6 +354,7 @@ $('#btn-test-ad').addEventListener('click', async () => {
 /* ------------------------------------------------------------- 设备列表 */
 const VENDOR_LABELS = {
   cisco: 'Cisco', h3c: 'H3C', huawei: '华为', ruijie: '锐捷',
+  fortinet: '飞塔',
 };
 
 function vendorOf(dev) {
@@ -362,7 +363,8 @@ function vendorOf(dev) {
 
 function vendorPill(dev) {
   const v = dev.device_type || 'cisco';
-  const cls = { cisco: 'cisco', h3c: 'h3c', huawei: 'huawei', ruijie: 'ruijie' }[v] || '';
+  const cls = { cisco: 'cisco', h3c: 'h3c', huawei: 'huawei', ruijie: 'ruijie',
+    fortinet: 'fortinet' }[v] || '';
   return `<span class="pill vendor-pill ${cls}">${esc(vendorOf(dev))}</span>`;
 }
 
@@ -390,6 +392,11 @@ const VENDOR_FALLBACK = {
   ruijie: {
     label: '锐捷 RGOS', default_port: 22, needs_enable: false,
     default_commands: ['show running-config', 'show lldp neighbors'],
+  },
+  fortinet: {
+    label: 'Fortinet FortiGate', default_port: 22, needs_enable: false,
+    default_commands: ['show full-configuration',
+      'diagnose lldp rx neighbor summary'],
   },
 };
 

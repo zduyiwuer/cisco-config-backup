@@ -203,12 +203,17 @@ def neighbors_of(device_id: int) -> list[dict[str, Any]]:
     if not device:
         return []
     vendor = vendors.normalize_vendor(device.get("device_type"))
-    parser_name = vendors.vendor_config(device["device_type"])["neighbor_parser"]
-    neighbor_cmd = vendors.vendor_config(device["device_type"])["neighbor_command"]
+    cfg = vendors.vendor_config(device["device_type"])
+    parser_name = cfg["neighbor_parser"]
+    neighbor_cmd = cfg["neighbor_command"]
 
     # 优先按厂商的邻居命令找；找不到再退回历史里的 lldp/cdp 输出
     candidates = [neighbor_cmd]
-    candidates += [c for c in device.get("commands", []) if c != neighbor_cmd]
+    # 部分厂商在不同版本间命令名不同（如飞塔 7.6.3 起 lldprx 改为 lldp rx）
+    alt_cmd = cfg.get("neighbor_command_alt")
+    if alt_cmd:
+        candidates.append(alt_cmd)
+    candidates += [c for c in device.get("commands", []) if c not in candidates]
     for cmd in candidates:
         row = db.latest_config(device_id, cmd)
         if not row:

@@ -728,6 +728,14 @@ def api_create_device(payload: DeviceIn, request: Request) -> dict[str, Any]:
     # 厂商归一：兼容旧的 cisco_ios 之类写法
     vendor = vendors.normalize_vendor(data.get("device_type") or "cisco_ios")
     data["device_type"] = vendor
+    # exclude_unset 会漏掉未显式传入的字段，
+    # protocol 与 port 在 db 层是按必填键访问的，这里补齐默认值
+    data.setdefault("protocol", "ssh")
+    # 厂商只支持某一种协议时（如飞塔只支持 SSH），强制纠正，
+    # 避免用户选了不支持的协议导致连接失败
+    allowed = vendors.vendor_config(vendor)["protocols"]
+    if data["protocol"] not in allowed:
+        data["protocol"] = allowed[0]
     # 未显式给端口时按厂商默认值
     if not data.get("port"):
         data["port"] = vendors.default_port_for(vendor)
@@ -755,7 +763,15 @@ def api_get_device(device_id: int) -> dict[str, Any]:
 @app.patch("/api/devices/{device_id}")
 def api_update_device(device_id: int, payload: DevicePatch, request: Request) -> dict[str, Any]:
     require_role(request, "operator")
-    device = db.update_device(device_id, payload.model_dump(exclude_unset=True))
+    data = payload.model_dump(exclude_unset=True)
+    # 切换厂商时，同步纠正协议与默认命令（厂商只支持单一协议时强制纠正）
+    if "device_type" in data:
+        vendor = vendors.normalize_vendor(data["device_type"])
+        data["device_type"] = vendor
+        allowed = vendors.vendor_config(vendor)["protocols"]
+        if "protocol" in data and data["protocol"] not in allowed:
+            data["protocol"] = allowed[0]
+    device = db.update_device(device_id, data)
     if not device:
         raise HTTPException(status_code=404, detail="设备不存在")
     scheduler.sync_schedule()

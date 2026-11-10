@@ -20,6 +20,7 @@ VENDOR_CISCO = "cisco"
 VENDOR_HUAWEI = "huawei"
 VENDOR_H3C = "h3c"
 VENDOR_RUIJIE = "ruijie"  # 锐捷，命令接近华为，附带支持
+VENDOR_FORTINET = "fortinet"  # 飞塔 FortiGate 防火墙
 
 VENDORS: dict[str, dict[str, Any]] = {
     VENDOR_CISCO: {
@@ -106,6 +107,40 @@ VENDORS: dict[str, dict[str, Any]] = {
         "neighbor_command": "show lldp neighbors",
         "neighbor_parser": "ruijie",
     },
+    VENDOR_FORTINET: {
+        "label": "Fortinet FortiGate",
+        "default_port": 22,
+        # FortiGate 官方不提供 Telnet 管理接口，只支持 SSH
+        "protocols": ("ssh",),
+        # 登录后直接进入特权视图（提示符 FGT #），无 enable 概念
+        "needs_enable": False,
+        "default_commands": [
+            "show full-configuration",
+            "diagnose lldp rx neighbor summary",
+        ],
+        # FortiGate 的分页提示是 --More--，与思科一致，
+        # 但关分页要在配置模式下执行（执行后提示符会变成 FGT (system console) #），
+        # 因此必须再发一条 end 退回顶层，否则后续命令会失败。
+        "paging_commands": [
+            "config system console set output standard",
+            "end",
+        ],
+        "prompt_patterns": [
+            # 顶层： FGT #  /  FGT $
+            # 配置模式： FGT (system console) #  /  FGT (port1) #
+            # VDOM 模式： FGT (root) #
+            r"[A-Za-z0-9_.\-]+(?:\s*\([^)\r\n]+\))?\s*[#$]\s*$",
+        ],
+        "version_command": "get system status",
+        #输出形如 "Version: FortiGate-VM64 v7.4.0,build2360,240205 (GA)"
+        "version_pattern": r"Version:\s*\S+\s+v?([0-9][^\s,]*)|FortiOS\s+v?([0-9][^\s,]*)",
+        # 7.6.3 起命令改为 "diagnose lldp rx neighbor summary"，
+        # 更早版本是 "diagnose lldprx neighbor summary"，采集时两个都试
+        "neighbor_command": "diagnose lldp rx neighbor summary",
+        "neighbor_parser": "fortinet",
+        # 备用邻居命令，供老版本 FortiOS 回退
+        "neighbor_command_alt": "diagnose lldprx neighbor summary",
+    },
 }
 
 # 老代码里的 cisco_ios / h3c_comware 之类类型名归一
@@ -123,6 +158,14 @@ VENDOR_ALIASES = {
     "ruijie_rgos": VENDOR_RUIJIE,
     "ruijie": VENDOR_RUIJIE,
     "rgos": VENDOR_RUIJIE,
+    "fortinet": VENDOR_FORTINET,
+    "fortigate": VENDOR_FORTINET,
+    "fortios": VENDOR_FORTINET,
+    "fortinet_fortigate": VENDOR_FORTINET,
+    "fgt": VENDOR_FORTINET,
+    # 兼容用户可能填的中文名
+    "飞塔": VENDOR_FORTINET,
+    "飞塔防火墙": VENDOR_FORTINET,
 }
 
 

@@ -10,15 +10,28 @@
 | **H3C Comware** | `h3c` | `display current-configuration` | `display lldp neighbor-information` | 不需要 |
 | **华为 VRP** | `huawei` | `display current-configuration` | `display lldp neighbor brief` | 不需要 |
 | **锐捷 RGOS** | `ruijie` | `show running-config` | `show lldp neighbors` | 不需要 |
+| **飞塔 FortiGate** | `fortinet` | `show full-configuration` | `diagnose lldp rx neighbor summary` | 不需要 |
 
 各厂商的差异已全部适配：
 
 - **命令集**：新增设备时按厂商自动套用，也可在设备里自定义
-- **提示符**：Cisco 用 `SW>` / `SW#`，华为与 H3C 用 `<Sysname>` / `[Sysname-GigabitEthernet0/0/1]`
-- **分页关闭**：Cisco `terminal length 0`，H3C `screen-length disable`，华为 `screen-length 0 temporary`
-- **邻居解析**：四家输出格式完全不同，各自独立解析
+- **提示符**：Cisco 用 `SW>` / `SW#`，华为与 H3C 用 `<Sysname>` / `[Sysname-GigabitEthernet0/0/1]`，飞塔用 `FGT #` / `FGT (system console) #`
+- **分页关闭**：Cisco `terminal length 0`，H3C `screen-length disable`，华为 `screen-length 0 temporary`，飞塔 `config system console set output standard`
+- **邻居解析**：五家输出格式完全不同，各自独立解析
 - **版本提取**：各厂商的版本号位置与格式不同
-- **特权提权**：只有 Cisco 需要 `enable`，华为/H3C 登录后即特权视图
+- **特权提权**：只有 Cisco 需要 `enable`，华为/H3C/飞塔登录后即特权视图
+
+### 飞塔 FortiGate 说明
+
+- **只支持 SSH**：FortiGate 官方不提供 Telnet 管理接口，选了其他协议会自动纠正为 SSH
+- **配置采集**：`show full-configuration` 输出全量配置
+- **分页处理**：飞塔的分页提示是 `--More--`，需要先执行
+  `config system console set output standard` 关闭。该命令会在**配置模式**下执行，
+  所以紧接着会发一条 `end` 退回顶层，避免后续命令失败
+- **VDOM**：登录后处于当前 VDOM 视图，`show full-configuration` 只包含该 VDOM 的配置；
+  需要全局配置时可在自定义命令里加 `config global`
+- **邻居命令版本差异**：FortiOS 7.6.3 起为 `diagnose lldp rx neighbor summary`，
+  更早版本是 `diagnose lldprx neighbor summary`，两者都做了兼容
 
 ## 功能
 

@@ -327,12 +327,104 @@ def parse_ruijie_neighbors(text: str) -> list[dict[str, Any]]:
     return result
 
 
+# ------------------------------------------------------------------ Fortinet
+# FortiGate 的 LLDP 邻居输出有两种格式：
+#
+# 1) diagnose lldp rx neighbor summary（7.6.3+）/ diagnose lldprx neighbor summary
+#    1 port 'wan1' mac E0:23:FF:AE:66:5D chassis E0:23:FF:AE:66:4E port 'port15' system 'Example_Router'
+#    7.0.3 及更早版本没有本端接口名，只有接口索引：
+#    1 port 24 mac AC:8F:F8:4B:DA:0C chassis AC:8F:F8:4B:D9:7D port '39714816' system 'UKHWU-P10-PBL002'
+#
+# 2) get system lldp neighbor（块格式）
+#    == [ wan ] Neighbor 1/2
+#    Port: wan
+#    MAC Address: 78:18:ec:ba:d9:1b
+#    Chassis ID: 78:18:ec:ba:d9:17
+#    Neighbor Port ID: port4
+#    TTL: 120
+#    IP Addresses: 169.254.251.4
+#    System Name: SCCA21-IDFA-SW2
+#    System Description: FortiSwitch-448E-FPOE v7.6.4,build1114,250821 (GA)
+_FGT_SUMMARY = re.compile(
+    r"^\s*(?P<idx>\d+)\s+"
+    # 本端接口：可能是 'wan1'（7.0.4+ 带名字），也可能是 'b' 14（带索引），
+    # 老版本则只有裸索引 24
+    r"port\s+(?:'(?P<local_if>[^']+)'(?:\s+(?P<local_idx>\d+))?|(?P<local_idx2>\d+))\s+"
+    r"mac\s+(?P<mac>[0-9A-Fa-f:]+)\s+"
+    r"chassis\s+(?P<chassis>[0-9A-Fa-f:]+)\s+"
+    r"port\s+'(?P<remote_if>[^']*)'\s+"
+    r"(?:system\s+'(?P<system>[^']*)')?\s*$",
+    re.M,
+)
+_FGT_BLOCK = re.compile(
+    r"^==\s*\[(?P<iface>[^\]]+)\]\s*Neighbor\s+\d+/\d+\s*$(?P<body>.*?)(?=^==\s*\[|\Z)",
+    re.M | re.S,
+)
+_FGT_B_PORT = re.compile(r"^\s*Port:\s*(.+)$", re.M)
+_FGT_B_PID = re.compile(r"^\s*Neighbor Port ID:\s*(.+)$", re.M)
+_FGT_B_IP = re.compile(r"^\s*IP Addresses:\s*(.+)$", re.M)
+_FGT_B_NAME = re.compile(r"^\s*System Name:\s*(.+)$", re.M)
+_FGT_B_DESC = re.compile(r"^\s*System Description:\s*(.+)$", re.M)
+
+
+def parse_fortinet_neighbors(text: str) -> list[dict[str, Any]]:
+    """解析 FortiGate 的 LLDP 邻居输出（summary 与块格式都支持）。"""
+    if not text:
+        return []
+    result: list[dict[str, Any]] = []
+
+    # 1) summary 格式：一行一条邻居
+    for m in _FGT_SUMMARY.finditer(text):
+        # 本端接口名：7.0.4+ 直接给名字；更早版本只给索引，无法还原，留空
+        local_if = m.group("local_if") or ""
+        system = (m.group("system") or "").strip()
+        if not system:
+            continue
+        result.append(
+            {
+                "device_id": system,
+                "ip": "",
+                "platform": "",
+                "capabilities": "",
+                "local_interface": local_if,
+                "remote_interface": (m.group("remote_if") or "").strip(),
+                "os_version": "",
+            }
+        )
+    if result:
+        return result
+
+    # 2) 块格式：get system lldp neighbor
+    for m in _FGT_BLOCK.finditer(text):
+        body = m.group("body")
+        name_m = _FGT_B_NAME.search(body)
+        if not name_m:
+            continue
+        ip_m = _FGT_B_IP.search(body)
+        desc_m = _FGT_B_DESC.search(body)
+        port_m = _FGT_B_PORT.search(body)
+        pid_m = _FGT_B_PID.search(body)
+        result.append(
+            {
+                "device_id": name_m.group(1).strip(),
+                "ip": (ip_m.group(1).strip() if ip_m else ""),
+                "platform": (desc_m.group(1).strip() if desc_m else ""),
+                "capabilities": "",
+                "local_interface": (m.group("iface").strip() if port_m else ""),
+                "remote_interface": (pid_m.group(1).strip() if pid_m else ""),
+                "os_version": "",
+            }
+        )
+    return result
+
+
 # ------------------------------------------------------------------- 分发
 PARSERS = {
     "cisco": parse_cdp_neighbors,
     "h3c": parse_h3c_neighbors,
     "huawei": parse_huawei_neighbors,
     "ruijie": parse_ruijie_neighbors,
+    "fortinet": parse_fortinet_neighbors,
 }
 
 
