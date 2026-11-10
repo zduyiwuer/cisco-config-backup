@@ -1,3 +1,38 @@
+# 多厂商网络设备配置备份中心 v1.2.0
+
+飞塔 FortiGate 的配置自动转换为标准 FortiOS `.conf` 格式。
+
+## 新增
+
+### 飞塔配置导出为标准 .conf
+
+`show full-configuration` 的输出原先直接存成 `.txt`，现在自动转换成
+FortiOS 备份文件格式，并补全头部元信息：
+
+```
+#config-version=FGT60F-7.0.5-FW-build0307-220331:opmode=0:vdom=0
+#conf_file_ver=202201,201912
+#buildno=0307,220331
+#global_vdom=1
+#serial=FGT60FTK20000000
+config system global
+    set hostname "FGT-01"
+    ...
+```
+
+- 型号归一：`FortiGate-60F` → `FGT60F`，`FortiGate-VM64` → `FGVM64`
+- 采集前先取一次 `get system status`，头部才有真实版本号
+- 导出打包时飞塔配置为 `.conf`，其他厂商仍是 `.txt`
+- 转换器做成可注册的机制（`CONFIG_TRANSFORMS`），后续其他厂商要转换可直接接入
+
+> ⚠️ FortiGate 官方明确说明：`show` 系列的输出**不能用于恢复配置**，
+> 真正可恢复的备份需要 `execute backup config`（要把文件推到 flash / FTP /
+> TFTP / 管理站）。本次转换产出的是规范化、可归档、可对比的配置文件，
+> 补上了版本头信息，在同型号同固件上可作为配置基线，
+> 但不含证书私钥等 `execute backup` 才有的内容。
+
+---
+
 # 多厂商网络设备配置备份中心 v1.1.0
 
 新增**飞塔 FortiGate 防火墙**支持，同时完善了历史记录管理与排查能力。
