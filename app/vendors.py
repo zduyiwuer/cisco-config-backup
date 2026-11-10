@@ -118,6 +118,11 @@ VENDORS: dict[str, dict[str, Any]] = {
             "show full-configuration",
             "diagnose lldp rx neighbor summary",
         ],
+        # .conf 头部需要型号与版本号，所以要先取一次 get system status
+        # 再采集配置（否则头部拿不到真实版本）
+        "prefetch_version": True,
+        # 配置输出需要转成标准 FortiOS .conf 格式
+        "config_transform": "fortinet_conf",
         # FortiGate 的分页提示是 --More--，与思科一致，
         # 但关分页要在配置模式下执行（执行后提示符会变成 FGT (system console) #），
         # 因此必须再发一条 end 退回顶层，否则后续命令会失败。

@@ -32,6 +32,20 @@
   需要全局配置时可在自定义命令里加 `config global`
 - **邻居命令版本差异**：FortiOS 7.6.3 起为 `diagnose lldp rx neighbor summary`，
   更早版本是 `diagnose lldprx neighbor summary`，两者都做了兼容
+- **配置导出为 .conf**：`show full-configuration` 的输出会自动转换成标准
+  FortiOS `.conf` 格式，补全 `#config-version` 等头部元信息，
+  导出打包时扩展名为 `.conf`（其他厂商仍是 `.txt`）
+
+#### 关于 .conf 文件的说明
+
+`show full-configuration` 的输出**不是** `execute backup config` 的等价物。
+FortiGate 官方明确说明：show 系列的输出**不能用于恢复配置**，只适合排查时查看；
+真正可恢复的备份要用 `execute backup config`（需要把文件推到 flash / FTP /
+TFTP / 管理站，从外部采集时难以获取文件内容）。
+
+本工具做的转换能产出一个**规范化、可归档、可对比**的配置文件，
+补上了备份文件必需的版本头信息，在同型号同固件版本上可作为配置基线使用。
+但它不含证书、私钥等只有 `execute backup` 才有的内容，也不能直接用于整机恢复。
 
 ## 功能
 

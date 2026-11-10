@@ -7,7 +7,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
-from . import db, neighbors, vendors
+from . import db, fortinet, neighbors, vendors
 from .drivers.base import (
     DeviceError,
     clean_output,
@@ -19,6 +19,30 @@ from .drivers.ssh_driver import SSHClient
 from .drivers.telnet_driver import TelnetClient
 
 log = logging.getLogger("cisco-backup.collector")
+
+# 配置输出转换器：厂商声明 config_transform 时，采集到的配置正文
+# 会先经转换器处理再入库（用于把原始输出整理成厂商标准格式）
+CONFIG_TRANSFORMS = {
+    # 飞塔：show full-configuration → 标准 FortiOS .conf
+    "fortinet_conf": lambda content, ctx: fortinet.to_conf(
+        content, ctx.get("status_output", "")
+    ),
+}
+
+
+def apply_config_transform(
+    content: str, transform_name: str, ctx: dict[str, Any]
+) -> str:
+    """按厂商声明的转换器处理配置输出。转换失败时保留原始内容。"""
+    fn = CONFIG_TRANSFORMS.get(transform_name)
+    if not fn:
+        return content
+    try:
+        converted = fn(content, ctx)
+        return converted if converted.strip() else content
+    except Exception as exc:  # noqa: BLE001
+        log.warning("配置格式转换失败（%s），保留原始输出: %s", transform_name, exc)
+        return content
 
 # 进行中的任务：device_id -> 状态字典
 RUNNING: dict[int, dict[str, Any]] = {}
@@ -77,12 +101,37 @@ def backup_device(device_id: int, trigger: str = "manual") -> dict[str, Any]:
         # 优先跑厂商的 version 命令拿准确版本号；命令列表里已有它就复用，
         # 没有则额外跑一次（该输出不计入备份文件，仅用于展示版本）
         version_cmd = vendors.vendor_config(device["device_type"])["version_command"]
+        vendor_cfg = vendors.vendor_config(device["device_type"])
         version_output = ""
         config_output = ""
+
+        # 某些厂商的配置需要版本信息才能转成标准格式（如飞塔 .conf 头部），
+        # 所以在采集配置之前先取一次版本输出
+        if vendor_cfg.get("prefetch_version"):
+            try:
+                version_output = clean_output(
+                    client.run(version_cmd), version_cmd, client.prompt
+                )
+            except DeviceError:
+                log.debug("[%s] 预取版本信息失败，忽略", device["name"])
+
+        transform_name = vendor_cfg.get("config_transform", "")
+        transform_ctx = {"status_output": version_output}
 
         for command in commands:
             raw = client.run(command)
             content = clean_output(raw, command, client.prompt)
+            # 配置类命令按厂商声明做格式转换（飞塔 show full → .conf）
+            low = command.strip().lower()
+            is_config_cmd = (
+                "current-configuration" in low
+                or "running-config" in low
+                or "full-configuration" in low
+            )
+            if transform_name and is_config_cmd:
+                content = apply_config_transform(
+                    content, transform_name, transform_ctx
+                )
             sha = sha256_text(content)
             file_meta, diff_meta = db.add_file(
                 backup_id, device_id, command, slugify(command), content, sha
@@ -92,10 +141,9 @@ def backup_device(device_id: int, trigger: str = "manual") -> dict[str, Any]:
                 changed = True
             log.info("[%s] %s %s", device["name"], command, "CHANGED" if changed else "OK")
 
-            low = command.strip().lower()
             if low == version_cmd:
                 version_output = content
-            if "current-configuration" in low or "running-config" in low:
+            if is_config_cmd:
                 config_output = content
 
         # 版本号：version 命令输出最准确；没有则从配置文件里兜底提取

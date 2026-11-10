@@ -45,6 +45,31 @@ def _timestamp(iso: str) -> str:
         return "unknown"
 
 
+# 各厂商配置文件的扩展名。飞塔的配置是标准 FortiOS .conf 格式，
+# 用 .conf 便于直接被设备识别（其他厂商保持 .txt）
+_CONFIG_EXT = {
+    "fortinet": ".conf",
+}
+
+
+def _file_ext(command: str, device_type: str | None = None) -> str:
+    """按厂商与命令类型决定导出文件的扩展名。"""
+    vendor = (device_type or "").strip().lower()
+    ext = _CONFIG_EXT.get(vendor)
+    if ext and _is_config_command(command):
+        return ext
+    return ".txt"
+
+
+def _is_config_command(command: str) -> bool:
+    low = (command or "").strip().lower()
+    return (
+        "current-configuration" in low
+        or "running-config" in low
+        or "full-configuration" in low
+    )
+
+
 def content_disposition(filename: str) -> str:
     """生成支持中文文件名的 Content-Disposition 头。
 
@@ -78,6 +103,7 @@ def _iter_backup_files(
                f.is_new, f.size, f.created_at,
                b.started_at, b.status, b.trigger, b.os_version,
                d.id AS device_id, d.name AS device_name, d.host, d.site, d.site_id,
+               d.device_type,
                s.name AS site_name
         FROM backup_files f
         JOIN backups b ON b.id = f.backup_id
@@ -172,7 +198,8 @@ def build_zip(
                 f"{root}/{_safe(site_label)}/{_safe(row['device_name'])}"
                 f"/{_timestamp(row['started_at'])}"
             )
-            fname = f"{dir_path}/{_safe(row['slug'])}.txt"
+            ext = _file_ext(row["command"], row.get("device_type"))
+            fname = f"{dir_path}/{_safe(row['slug'])}{ext}"
             zf.writestr(fname, row["content"])
 
             diff = diffs.get(row["file_id"])
@@ -245,7 +272,7 @@ def _readme(
         "",
         "目录结构",
         "-" * 46,
-        "  <门店>/<设备>/<备份时间>/<命令>.txt",
+        "  <门店>/<设备>/<备份时间>/<命令>.<扩展名>",
         "  <门店>/<设备>/<备份时间>/_diff/<命令>.diff   与上一版本的差异",
         "",
         "清单文件",
@@ -256,6 +283,7 @@ def _readme(
         "说明",
         "-" * 46,
         "  * .txt 为设备命令原始输出（已去除命令回显与提示符）",
+        "  * 飞塔的配置为标准 FortiOS .conf 格式（已补全版本头信息）",
         "  * .diff 为该版本相对上一版本的 unified diff，+为新增、-为删除",
         "  * 目录时间即备份执行时间，按设备倒序排列，最新版本在最前",
         "",
