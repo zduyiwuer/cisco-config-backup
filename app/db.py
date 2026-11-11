@@ -21,6 +21,9 @@ from typing import Any, Iterable
 
 from .crypto import decrypt, encrypt
 
+# vendors 不依赖 db，模块级导入无循环风险
+from . import vendors
+
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 DB_PATH = DATA_DIR / "cisco_backup.db"
 
@@ -599,7 +602,13 @@ def create_device(payload: dict[str, Any]) -> dict[str, Any]:
                 encrypt(payload.get("password", "")),
                 encrypt(payload["enable_password"]) if payload.get("enable_password") else None,
                 payload.get("device_type", "cisco_ios"),
-                json.dumps(payload.get("commands") or DEFAULT_COMMANDS, ensure_ascii=False),
+                json.dumps(
+                    payload.get("commands")
+                    # 未指定命令时按厂商套用默认命令集，
+                    # 不能用全局 DEFAULT_COMMANDS（那是思科的）
+                    or vendors.default_commands_for(payload.get("device_type")),
+                    ensure_ascii=False,
+                ),
                 1 if payload.get("enabled", True) else 0,
                 1 if payload.get("schedule_enabled") else 0,
                 payload.get("cron", "0 2 * * *"),
@@ -632,8 +641,6 @@ def update_device(device_id: int, payload: dict[str, Any]) -> dict[str, Any] | N
         values.extend([site_id, site_name])
     # 厂商变更时：若设备用的还是旧厂商的默认命令集，则同步为新厂商的命令集
     if "device_type" in payload:
-        from . import vendors
-
         old_vendor = vendors.normalize_vendor(existing["device_type"])
         new_vendor = vendors.normalize_vendor(payload["device_type"])
         if new_vendor != old_vendor:

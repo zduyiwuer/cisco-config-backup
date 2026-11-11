@@ -409,12 +409,27 @@ async function loadVendors() {
       $('#f-vendor').innerHTML = list
         .map((v) => `<option value="${v.id}">${esc(v.label)}</option>`)
         .join('');
+      // 设备清单导出的厂商筛选
+      const deVendor = $('#de-vendor');
+      if (deVendor) {
+        const cur = deVendor.value;
+        deVendor.innerHTML = '<option value="">全部厂商</option>' + list
+          .map((v) => `<option value="${v.id}">${esc(v.label)}</option>`)
+          .join('');
+        deVendor.value = cur;
+      }
     } else {
       throw new Error('厂商清单为空');
     }
   } catch (e) {
     // 接口异常时用兜底数据，保证联动仍然可用
     state.vendors = { ...VENDOR_FALLBACK };
+    const deVendor = $('#de-vendor');
+    if (deVendor && !deVendor.options.length) {
+      deVendor.innerHTML = '<option value="">全部厂商</option>' + Object.entries(
+        VENDOR_FALLBACK
+      ).map(([k, v]) => `<option value="${k}">${esc(v.label)}</option>`).join('');
+    }
   }
   applyVendorDefaults();
 }
@@ -958,6 +973,13 @@ function fillSiteSelects() {
   const opts = state.sites.map((s) => `<option value="${s.id}">${esc(s.name)}${s.code ? ' (' + esc(s.code) + ')' : ''}</option>`).join('');
   $('#f-site-id').innerHTML = '<option value="">未归属</option>' + opts;
   $('#e-site').innerHTML = '<option value="">请选择门店</option>' + opts;
+  // 设备清单导出的门店下拉（空=全部）
+  const deSite = $('#de-site');
+  if (deSite) {
+    const cur = deSite.value;
+    deSite.innerHTML = '<option value="">全部门店</option>' + opts;
+    deSite.value = cur;
+  }
   const cur = $('#device-site-filter').value;
   $('#device-site-filter').innerHTML =
     '<option value="">全部门店</option>' + opts + '<option value="none">仅未归属设备</option>';
@@ -1051,6 +1073,63 @@ $('#e-site').addEventListener('change', refreshExportPreview);
 $('#e-device').addEventListener('change', refreshExportPreview);
 $('#btn-download-all').addEventListener('click', () => downloadPackage({ scope: 'all' }, '正在打包全部门店…'));
 $('#btn-download-all-top').addEventListener('click', () => downloadPackage({ scope: 'all' }, '正在打包全部门店…'));
+
+/* ------------------------------------------------------------- 设备清单导出 */
+function deviceExportParams() {
+  const p = new URLSearchParams();
+  const site = $('#de-site').value;
+  if (site) p.set('site_id', site);
+  const vendor = $('#de-vendor').value;
+  if (vendor) p.set('vendor', vendor);
+  const kw = $('#de-keyword').value.trim();
+  if (kw) p.set('keyword', kw);
+  if ($('#de-extra').checked) p.set('include_extra', 'true');
+  if ($('#de-password').checked) p.set('include_password', 'true');
+  return p;
+}
+
+async function downloadDeviceList(fmt, btn) {
+  const withPw = $('#de-password').checked;
+  if (withPw && !confirm(
+    '导出文件将包含所有设备的明文登录密码。\n\n' +
+    '请确认文件不会被随意分发，导出后及时妥善保管。\n\n确定继续吗？'
+  )) {
+    return;
+  }
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '导出中…';
+  try {
+    const p = deviceExportParams();
+    const res = await fetch(`/api/export/devices.${fmt}?${p.toString()}`);
+    if (!res.ok) {
+      let d = res.statusText;
+      try { d = (await res.json()).detail || d; } catch (e) { /* ignore */ }
+      throw new Error(d);
+    }
+    const count = res.headers.get('X-Export-Devices') || '?';
+    const blob = await res.blob();
+    const cd = res.headers.get('Content-Disposition') || '';
+    const m = cd.match(/filename\*=UTF-8''([^;]+)/);
+    const name = m ? decodeURIComponent(m[1]) : `设备清单.${fmt}`;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    toast(`已导出 ${count} 台设备的清单`, 'ok');
+  } catch (err) {
+    toast(err.message, 'err');
+  }
+  btn.disabled = false;
+  btn.textContent = label;
+}
+
+$('#btn-devices-xlsx').addEventListener('click', (e) => downloadDeviceList('xlsx', e.currentTarget));
+$('#btn-devices-csv').addEventListener('click', (e) => downloadDeviceList('csv', e.currentTarget));
 $('#device-site-filter').addEventListener('change', (e) => renderDevices($('#device-search').value));
 $('#device-online-filter').addEventListener('change', (e) => renderDevices($('#device-search').value));
 $('#device-backup-filter').addEventListener('change', () => renderDevices($('#device-search').value));

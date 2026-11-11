@@ -21,7 +21,7 @@ from fastapi.responses import (
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import ad, auth, collector, db, exporter, importer, probe, scheduler, vendors
+from . import ad, auth, collector, db, device_export, exporter, importer, probe, scheduler, vendors
 from .drivers.base import DEFAULT_COMMANDS, DeviceError
 
 logging.basicConfig(
@@ -1015,6 +1015,74 @@ def api_export_package(payload: ExportIn, request: Request) -> Response:
             "Content-Disposition": exporter.content_disposition(filename),
             "X-Export-Files": str(stats.get("files", 0)),
             "X-Export-Devices": str(stats.get("devices", 0)),
+        },
+    )
+
+
+@app.get("/api/export/devices.csv")
+def api_export_devices_csv(
+    request: Request,
+    site_id: int | None = None,
+    vendor: str | None = None,
+    keyword: str | None = None,
+    include_password: bool = False,
+    include_extra: bool = True,
+) -> Response:
+    """导出设备清单为 CSV。
+
+    列结构与「批量导入」模板一致，可改完直接导回。
+    默认不导出密码；需要时传 include_password=true（需 admin 权限）。
+    """
+    if include_password:
+        require_role(request, "admin")
+    else:
+        require_role(request, "viewer")
+    content, filename, stats = device_export.export_csv(
+        site_id=site_id,
+        vendor=vendor,
+        keyword=keyword,
+        include_password=include_password,
+        include_extra=include_extra,
+    )
+    log.info("导出设备清单 CSV: %s 台设备", stats["devices"])
+    return Response(
+        content=content,
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": exporter.content_disposition(filename),
+            "X-Export-Devices": str(stats["devices"]),
+        },
+    )
+
+
+@app.get("/api/export/devices.xlsx")
+def api_export_devices_xlsx(
+    request: Request,
+    site_id: int | None = None,
+    vendor: str | None = None,
+    keyword: str | None = None,
+    include_password: bool = False,
+    include_extra: bool = True,
+) -> Response:
+    """导出设备清单为 Excel。"""
+    if include_password:
+        require_role(request, "admin")
+    else:
+        require_role(request, "viewer")
+    content, filename, stats = device_export.export_xlsx(
+        site_id=site_id,
+        vendor=vendor,
+        keyword=keyword,
+        include_password=include_password,
+        include_extra=include_extra,
+    )
+    log.info("导出设备清单 XLSX: %s 台设备", stats["devices"])
+    return Response(
+        content=content,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": exporter.content_disposition(filename),
+            "X-Export-Devices": str(stats["devices"]),
         },
     )
 

@@ -252,6 +252,35 @@
         </div>
       </div>
     </div>
+
+    <div class="card export-card">
+      <h3 style="padding:18px 22px 0">导出设备清单</h3>
+      <p class="export-desc">
+        导出全部设备的清单，列结构与「批量导入」模板一致，改完可直接导回系统。
+        默认<strong>不导出密码</strong>，末尾附带在线状态、最后备份时间等只读列。
+      </p>
+      <div class="export-body">
+        <div class="form-grid">
+          <label>门店
+            <select id="de-site"><option value="">全部门店</option></select>
+          </label>
+          <label>厂商
+            <select id="de-vendor">
+              <option value="">全部厂商</option>
+            </select>
+          </label>
+          <label>关键字
+            <input id="de-keyword" type="text" placeholder="设备名 / IP / 门店">
+          </label>
+        </div>
+        <label class="inline block"><input type="checkbox" id="de-extra" checked> 附带只读列（在线状态、最后备份结果等）</label>
+        <label class="inline block"><input type="checkbox" id="de-password"> 包含登录密码（仅管理员，请妥善保管文件）</label>
+        <div style="display:flex;gap:10px;margin-top:16px">
+          <button class="btn primary" id="btn-devices-xlsx">下载 Excel</button>
+          <button class="btn ghost" id="btn-devices-csv">下载 CSV</button>
+        </div>
+      </div>
+    </div>
   </section>
 </main>
 
